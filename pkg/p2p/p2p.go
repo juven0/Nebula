@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -102,4 +103,14 @@ func sendMessage(h host.Host, target peer.AddrInfo, message string) {
 		return
 	}
 	s.Close()
+}
+
+func sendFileBLock(h host.Host, target peer.AddrInfo, fileBlock FileBlock) {
+	s, err := h.NewStream(context.Background(), target.ID, "/p2p/1.0.0")
+	if err != nil {
+		log.Println("Erreur lors de la création du flux:", err)
+		return
+	}
+	encoder := json.NewEncoder(s)
+	err = encoder.Encode(fileBlock)
 }
