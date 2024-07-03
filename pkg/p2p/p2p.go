@@ -42,6 +42,21 @@ func (p2pn *P2pNetwork) Network() {
 	}
 	p2pn.host = h
 
+	// connexion
+	perrAddr, err := multiaddr.NewMultiaddr("node address")
+	if err != nil {
+		log.Fatal(err)
+	}
+	peerInfo, err := peer.AddrInfoFromP2pAddr(perrAddr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := h.Connect(ctx, *peerInfo); err != nil {
+		log.Fatal(err)
+	} else {
+		fmt.Println("Connexion réussie à :", peerInfo)
+	}
+
 	h.SetStreamHandler("/p2p/1.0.0", func(s network.Stream) {
 		blockchains.HandleFileStream(s, &fileBLockchain)
 	})
@@ -63,6 +78,17 @@ func (p2pn *P2pNetwork) Network() {
 		sendMessage(h, *peerinfo, "Bonjour depuis "+h.ID().String())
 	}
 
+	go func() {
+		for {
+			time.Sleep(10 * time.Second)
+			peers := h.Peerstore().Peers()
+			fmt.Println("Nombre de pairs connectés:", len(peers))
+			for _, p := range peers {
+				addrs := h.Peerstore().Addrs(p)
+				fmt.Println("Pair:", p.String(), "Adresses:", addrs)
+			}
+		}
+	}()
 	// check all block ..
 	go func() {
 		for {
