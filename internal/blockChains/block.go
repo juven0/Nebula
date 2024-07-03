@@ -1,9 +1,17 @@
 package blockchains
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"log"
 	"time"
+
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type File struct {
@@ -81,4 +89,48 @@ func isValidFileBlock(newBlock, prevBlock FileBlock) bool {
 		return false
 	}
 	return true
+}
+
+func HandleFileStream(s network.Stream, fileBlockchain *[]FileBlock) {
+	var newFileBlock FileBlock
+	decoder := json.NewDecoder(s)
+	err := decoder.Decode(&newFileBlock)
+	if err != nil {
+		log.Println("Failed to decode new file block:", err)
+		return
+	}
+	AddFileBlock(fileBlockchain, newFileBlock)
+	fmt.Println("New file block added to the blockchain:", newFileBlock)
+	DisplayTransactions(*fileBlockchain)
+	s.Close()
+}
+
+func sendFileBLock(h host.Host, target peer.AddrInfo, fileBlock FileBlock) {
+	s, err := h.NewStream(context.Background(), target.ID, "/p2p/1.0.0")
+	if err != nil {
+		log.Println("Erreur lors de la création du flux:", err)
+		return
+	}
+	encoder := json.NewEncoder(s)
+	err = encoder.Encode(fileBlock)
+}
+
+// check all block
+
+func DisplayTransactions(blockchain []FileBlock) {
+	fmt.Println("Current Blockchain State:")
+	for _, block := range blockchain {
+		fmt.Printf("Block Index: %d\n", block.Index)
+		fmt.Printf("Timestamp: %s\n", block.Timestamp)
+		fmt.Printf("Previous Hash: %s\n", block.PrevHash)
+		fmt.Printf("Hash: %s\n", block.Hash)
+		fmt.Println("Files:")
+		for _, file := range block.Files {
+			fmt.Printf("  File ID: %s\n", file.FileId)
+			fmt.Printf("  File Name: %s\n", file.FileName)
+			fmt.Printf("  File Size: %d\n", file.FileSize)
+			fmt.Printf("  Owner: %s\n", file.Owner)
+		}
+		fmt.Println()
+	}
 }
