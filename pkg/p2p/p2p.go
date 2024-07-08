@@ -43,7 +43,7 @@ func (p2pn *P2pNetwork) Network() {
 	p2pn.host = h
 
 	// connexion
-	perrAddr, err := multiaddr.NewMultiaddr("node address")
+	perrAddr, err := multiaddr.NewMultiaddr("/ip4/192.168.1.121/tcp/61979/p2p/12D3KooWAnaLwr2ksZMCvngJdTAhFsGdM2ytYuPuNnNpYWToz35J")
 	if err != nil {
 		log.Fatal(err)
 	}

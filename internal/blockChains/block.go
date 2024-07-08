@@ -9,24 +9,17 @@ import (
 	"log"
 	"time"
 
+	file "nebula/internal/files"
+
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-type File struct {
-	FileId      string
-	FileName    string
-	FileSize    int64
-	FileContent []byte
-	Timestamp   string
-	Owner       string
-}
-
 type FileBlock struct {
 	Index     int
 	Timestamp string
-	Files     []File
+	Files     []file.File
 	PrevHash  string
 	Hash      string
 	Nonce     int
@@ -44,7 +37,7 @@ func (fb *FileBlock) CalculeteFileHash() string {
 	return hex.EncodeToString(hashed)
 }
 
-func CreateFileBlock(preBLock FileBlock, files []File) FileBlock {
+func CreateFileBlock(preBLock FileBlock, files []file.File) FileBlock {
 	block := FileBlock{
 		Index:     preBLock.Index + 1,
 		Timestamp: time.Now().String(),
@@ -60,7 +53,7 @@ func CreateFileGenesisBlock() FileBlock {
 	return FileBlock{
 		Index:     0,
 		Timestamp: time.Now().String(),
-		Files:     []File{},
+		Files:     []file.File{},
 		PrevHash:  "",
 		Hash:      "",
 		Nonce:     0,
