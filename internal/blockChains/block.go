@@ -2,8 +2,6 @@ package blockchains
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -16,29 +14,12 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-type FileBlock struct {
-	Index     int
-	Timestamp string
-	Files     []file.File
-	PrevHash  string
-	Hash      string
-	Nonce     int
-}
-
 type FileBLockChain struct {
-	Blocks []FileBlock
+	Blocks []file.FileBlock
 }
 
-func (fb *FileBlock) CalculeteFileHash() string {
-	record := string(rune(fb.Index)) + fb.Timestamp + string(rune(fb.Nonce)) + fb.PrevHash
-	h := sha256.New()
-	h.Write([]byte(record))
-	hashed := h.Sum(nil)
-	return hex.EncodeToString(hashed)
-}
-
-func CreateFileBlock(preBLock FileBlock, files []file.File) FileBlock {
-	block := FileBlock{
+func CreateFileBlock(preBLock file.FileBlock, files []file.File) file.FileBlock {
+	block := file.FileBlock{
 		Index:     preBLock.Index + 1,
 		Timestamp: time.Now().String(),
 		Files:     files,
@@ -49,8 +30,8 @@ func CreateFileBlock(preBLock FileBlock, files []file.File) FileBlock {
 	return block
 }
 
-func CreateFileGenesisBlock() FileBlock {
-	return FileBlock{
+func CreateFileGenesisBlock() file.FileBlock {
+	return file.FileBlock{
 		Index:     0,
 		Timestamp: time.Now().String(),
 		Files:     []file.File{},
@@ -60,18 +41,18 @@ func CreateFileGenesisBlock() FileBlock {
 	}
 }
 
-func InitializeFileBlockchain() []FileBlock {
+func InitializeFileBlockchain() []file.FileBlock {
 	genesisBlock := CreateFileGenesisBlock()
-	return []FileBlock{genesisBlock}
+	return []file.FileBlock{genesisBlock}
 }
 
-func AddFileBlock(bc *[]FileBlock, newBlock FileBlock) {
+func AddFileBlock(bc *[]file.FileBlock, newBlock file.FileBlock) {
 	if isValidFileBlock(newBlock, (*bc)[len(*bc)-1]) {
 		*bc = append(*bc, newBlock)
 	}
 }
 
-func isValidFileBlock(newBlock, prevBlock FileBlock) bool {
+func isValidFileBlock(newBlock, prevBlock file.FileBlock) bool {
 	if prevBlock.Index+1 != newBlock.Index {
 		return false
 	}
@@ -84,8 +65,8 @@ func isValidFileBlock(newBlock, prevBlock FileBlock) bool {
 	return true
 }
 
-func HandleFileStream(s network.Stream, fileBlockchain *[]FileBlock) {
-	var newFileBlock FileBlock
+func HandleFileStream(s network.Stream, fileBlockchain *[]file.FileBlock) {
+	var newFileBlock file.FileBlock
 	decoder := json.NewDecoder(s)
 	err := decoder.Decode(&newFileBlock)
 	if err != nil {
@@ -98,7 +79,7 @@ func HandleFileStream(s network.Stream, fileBlockchain *[]FileBlock) {
 	s.Close()
 }
 
-func sendFileBLock(h host.Host, target peer.AddrInfo, fileBlock FileBlock) {
+func sendFileBLock(h host.Host, target peer.AddrInfo, fileBlock file.FileBlock) {
 	s, err := h.NewStream(context.Background(), target.ID, "/p2p/1.0.0")
 	if err != nil {
 		log.Println("Erreur lors de la création du flux:", err)
@@ -110,7 +91,7 @@ func sendFileBLock(h host.Host, target peer.AddrInfo, fileBlock FileBlock) {
 
 // check all block
 
-func DisplayTransactions(blockchain []FileBlock) {
+func DisplayTransactions(blockchain []file.FileBlock) {
 	fmt.Println("Current Blockchain State:")
 	for _, block := range blockchain {
 		fmt.Printf("Block Index: %d\n", block.Index)
