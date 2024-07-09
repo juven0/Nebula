@@ -1,11 +1,11 @@
 ### TODO: Créer un Système de Stockage de Fichiers Décentralisé
 
 1. **Fragmentation et Hashing**
-   - [ ] Fragmenter les fichiers en blocs plus petits de taille fixe.
-   - [ ] Hash chaque bloc de fichier avec une fonction de hachage cryptographique (par exemple, SHA-256).
+   - [ x ] Fragmenter les fichiers en blocs plus petits de taille fixe.
+   - [ x ] Hash chaque bloc de fichier avec une fonction de hachage cryptographique (par exemple, SHA-256).
 
 2. **Distribution des Blocs**
-   - [ ] Mettre en place un réseau peer-to-peer (P2P) pour distribuer les blocs.
+   - [ x ] Mettre en place un réseau peer-to-peer (P2P) pour distribuer les blocs.
    - [ ] Implémenter une table de hachage distribuée (DHT) pour localiser les blocs.
 
 3. **Récupération et Réassemblage des Fichiers**
