@@ -2,7 +2,7 @@ package dht
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -12,6 +12,7 @@ import (
 	//"strings"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ping "github.com/libp2p/go-libp2p/p2p/protocol/ping"
@@ -54,11 +55,20 @@ func NewNode(nodeId NodeID, addr string, port int) Node {
 }
 
 func GenerateNodeId(data string) NodeID {
-	hash := sha256.Sum256([]byte(data))
-	var ID NodeID
-	copy(ID[:], hash[:])
+	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	if err != nil {
+		panic(err)
+	}
 
-	return ID
+	// Obtenir le peer.ID à partir de la clé publique
+	pid, err := peer.IDFromPublicKey(priv.GetPublic())
+	if err != nil {
+		panic(err)
+	}
+	var nodeID NodeID
+	copy(nodeID[:], pid)
+	return nodeID
+
 }
 
 func XOR(a, b NodeID) big.Int {
@@ -93,13 +103,6 @@ func NodeIDToPeerID(nodeID NodeID) (peer.ID, error) {
 	return peer.Decode(hexID)
 }
 func isActiveNode(h host.Host, node Node) bool {
-	// out, _ := exec.Command("ping", node.Addr, "-c 5", "-i 3", "-w 10").Output()
-	// if strings.Contains(string(out), "Destination Host Unreachable") {
-	// 	return false
-	// } else {
-	// 	return true
-	// }
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
