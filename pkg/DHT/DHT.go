@@ -2,8 +2,6 @@ package dht
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"math/big"
@@ -12,7 +10,6 @@ import (
 	//"strings"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ping "github.com/libp2p/go-libp2p/p2p/protocol/ping"
@@ -24,10 +21,8 @@ const (
 	BucketSize = 20
 )
 
-type NodeID [IdLength]byte
-
 type Node struct {
-	NodeID NodeID
+	NodeID peer.ID
 	Addr   string
 	Port   int
 }
@@ -46,69 +41,82 @@ type DHT struct {
 	DataStore    map[string][]byte
 }
 
-func NewNode(nodeId NodeID, addr string, port int) Node {
+func NewNode(peerID peer.ID, addr string, port int) Node {
 	return Node{
-		NodeID: nodeId,
+		NodeID: peerID,
 		Addr:   addr,
 		Port:   port,
 	}
 }
 
-func GenerateNodeId(data string) NodeID {
-	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+// func GenerateNodeId(data string) NodeID {
+// 	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+
+// 	// Obtenir le peer.ID à partir de la clé publique
+// 	pid, err := peer.IDFromPublicKey(priv.GetPublic())
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	var nodeID NodeID
+// 	copy(nodeID[:], pid)
+// 	return nodeID
+
+// }
+
+func XOR(a, b peer.ID) big.Int {
+	aBytes, err := a.Marshal()
 	if err != nil {
-		panic(err)
+		log.Fatalf("failed to marshal peer.ID a: %v", err)
+	}
+	bBytes, err := b.Marshal()
+	if err != nil {
+		log.Fatalf("failed to marshal peer.ID b: %v", err)
 	}
 
-	// Obtenir le peer.ID à partir de la clé publique
-	pid, err := peer.IDFromPublicKey(priv.GetPublic())
-	if err != nil {
-		panic(err)
-	}
-	var nodeID NodeID
-	copy(nodeID[:], pid)
-	return nodeID
-
-}
-
-func XOR(a, b NodeID) big.Int {
-	aInt := new(big.Int).SetBytes(a[:])
-	bInt := new(big.Int).SetBytes(b[:])
+	aInt := new(big.Int).SetBytes(aBytes)
+	bInt := new(big.Int).SetBytes(bBytes)
 
 	return *new(big.Int).Xor(aInt, bInt)
 }
 
 func (bucket *Bucket) AddNodeBucket(host host.Host, node Node) {
+	// Check if the node is already in the bucket
 	for _, n := range bucket.Nodes {
 		if n.NodeID == node.NodeID {
 			return
 		}
+	}
 
-		if len(bucket.Nodes) < BucketSize {
-			bucket.Nodes = append(bucket.Nodes, node)
-		} else {
-			for i, existingNode := range bucket.Nodes {
-				if !isActiveNode(host, existingNode) {
-					bucket.Nodes[i] = node
-				}
-
+	// Add the node to the bucket if there's space
+	if len(bucket.Nodes) < BucketSize {
+		bucket.Nodes = append(bucket.Nodes, node)
+	} else {
+		// If the bucket is full, check for inactive nodes
+		for i, existingNode := range bucket.Nodes {
+			if !isActiveNode(host, existingNode) {
+				bucket.Nodes[i] = node
+				return
 			}
-			bucket.Nodes = append(bucket.Nodes[1:], node)
 		}
+
+		// If no inactive nodes are found, evict the oldest node (the first one)
+		bucket.Nodes = append(bucket.Nodes[1:], node)
 	}
 }
 
-func NodeIDToPeerID(nodeID NodeID) (peer.ID, error) {
-	hexID := hex.EncodeToString(nodeID[:])
-	return peer.Decode(hexID)
-}
+//	func NodeIDToPeerID(nodeID N) (peer.ID, error) {
+//		hexID := hex.EncodeToString(nodeID[:])
+//		return peer.Decode(hexID)
+//	}
 func isActiveNode(h host.Host, node Node) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
-	peerId, _ := NodeIDToPeerID(node.NodeID)
 	peerInfo := peer.AddrInfo{
-		ID:    peerId,
+		ID:    node.NodeID,
 		Addrs: []multiaddr.Multiaddr{multiaddr.StringCast(node.Addr)},
 	}
 

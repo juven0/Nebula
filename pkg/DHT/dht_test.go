@@ -2,8 +2,6 @@ package dht
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"math/big"
 	"testing"
 
@@ -13,62 +11,82 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Test de la génération de NodeID
-func TestGenerateNodeId(t *testing.T) {
-	data := "test_data"
-	nodeID := GenerateNodeId(data)
-	expectedHash := sha256.Sum256([]byte(data))
-	assert.Equal(t, expectedHash[:], nodeID[:], "Les NodeIDs ne correspondent pas")
-}
-
-// Test de l'algorithme XOR
 func TestXOR(t *testing.T) {
-	a := GenerateNodeId("a")
-	b := GenerateNodeId("b")
-	result := XOR(a, b)
-	expectedResult := new(big.Int).Xor(new(big.Int).SetBytes(a[:]), new(big.Int).SetBytes(b[:]))
-	assert.Equal(t, expectedResult, &result, "Les résultats XOR ne correspondent pas")
+	peerA, err := peer.Decode("12D3KooWSRZz3VS4v5HmkVq4t6e3VRC5vdsTfTZLhZDfnkWd6FZj")
+	assert.NoError(t, err)
+	peerB, err := peer.Decode("12D3KooWKXfXjXL5Uzn5FbSiQ84WzgnLBRzA4aRjHTE2cfoU85RA")
+	assert.NoError(t, err)
+
+	aBytes, err := peerA.Marshal()
+	assert.NoError(t, err)
+	bBytes, err := peerB.Marshal()
+	assert.NoError(t, err)
+
+	expectedResult := new(big.Int).Xor(
+		new(big.Int).SetBytes(aBytes),
+		new(big.Int).SetBytes(bBytes),
+	)
+
+	actualResult := XOR(peerA, peerB)
+	assert.Equal(t, expectedResult, &actualResult, "XOR results do not match")
 }
 
-// Test de l'ajout de nœud dans le bucket
 func TestAddNodeBucket(t *testing.T) {
-	nodeID1 := GenerateNodeId("node1")
-	nodeID2 := GenerateNodeId("node2")
-	node1 := NewNode(nodeID1, "/ip4/127.0.0.1/tcp/4001", 4001)
-	node2 := NewNode(nodeID2, "/ip4/127.0.0.1/tcp/4002", 4002)
-	bucket := Bucket{Nodes: []Node{}}
+	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	assert.NoError(t, err)
 
-	// Ajouter les nœuds
-	priv, _, _ := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, rand.Reader)
-	h, _ := libp2p.New(libp2p.Identity(priv))
+	host, err := libp2p.New(
+		libp2p.Identity(priv),
+	)
+	assert.NoError(t, err)
 
-	bucket.AddNodeBucket(h, node1)
-	bucket.AddNodeBucket(h, node2)
-
-	assert.Contains(t, bucket.Nodes, node1, "Le nœud 1 devrait être dans le bucket")
-	assert.Contains(t, bucket.Nodes, node2, "Le nœud 2 devrait être dans le bucket")
+	nodeA := NewNode(host.ID(), "/ip4/127.0.0.1/tcp/12345", 12345)
+	nodeB := NewNode(host.ID(), "/ip4/127.0.0.1/tcp/12346", 12346)
+	t.Logf("Nodes in bucket after adding nodeA: %+v", nodeB)
+	bucket := Bucket{}
+	bucket.AddNodeBucket(host, nodeA)
+	t.Logf("Nodes in bucket after adding nodeA: %+v", bucket.Nodes)
+	assert.Len(t, bucket.Nodes, 1, "Bucket should have 1 node")
+	bucket.AddNodeBucket(host, nodeB)
+	t.Logf("Nodes in bucket after adding nodeB: %+v", bucket.Nodes)
+	assert.Len(t, bucket.Nodes, 2, "Bucket should have 2 nodes")
 }
 
-// Test de la fonction de ping
-func TestPingNode(t *testing.T) {
-	// Créer un hôte libp2p
-	priv, _, _ := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, rand.Reader)
-	h, _ := libp2p.New(libp2p.Identity(priv))
+func TestIsActiveNode(t *testing.T) {
+	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	assert.NoError(t, err)
 
-	nodeID := GenerateNodeId("node_ping")
-	node := NewNode(nodeID, "/ip4/127.0.0.1/tcp/4001", 4001)
+	host, err := libp2p.New(
+		libp2p.Identity(priv),
+	)
+	assert.NoError(t, err)
 
-	active := isActiveNode(h, node)
-	assert.False(t, active, "Le nœud ne devrait pas être actif")
+	node := NewNode(host.ID(), "/ip4/127.0.0.1/tcp/12345", 12345)
+
+	// Since the node is the same as the host, it should be active
+	active := isActiveNode(host, node)
+	assert.True(t, active, "Node should be active")
 }
 
-// Test de la conversion de NodeID en PeerID
-func TestNodeIDToPeerID(t *testing.T) {
-	nodeID := GenerateNodeId("peer_test")
-	peerID, err := NodeIDToPeerID(nodeID)
-	assert.NoError(t, err, "Il ne devrait pas y avoir d'erreur lors de la conversion")
+func TestAddNodeRoutingTable(t *testing.T) {
+	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	assert.NoError(t, err)
 
-	// Convertir nodeID en chaîne hexadécimale pour comparaison
-	expectedPeerID, _ := peer.Decode(hex.EncodeToString(nodeID[:]))
-	assert.Equal(t, expectedPeerID, peerID, "Les PeerIDs ne correspondent pas")
+	host, err := libp2p.New(
+		libp2p.Identity(priv),
+	)
+	assert.NoError(t, err)
+
+	selfNode := NewNode(host.ID(), "/ip4/127.0.0.1/tcp/12345", 12345)
+	rt := NewRoutingTable(selfNode)
+
+	nodeB := NewNode(host.ID(), "/ip4/127.0.0.1/tcp/12346", 12346)
+
+	rt.AddNodeRoutingTable(host, nodeB)
+	// We should have 1 node in one of the buckets
+	nodesCount := 0
+	for _, bucket := range rt.Buckets {
+		nodesCount += len(bucket.Nodes)
+	}
+	assert.Equal(t, 1, nodesCount, "Routing table should have 1 node")
 }
