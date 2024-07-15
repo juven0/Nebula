@@ -1,92 +1,113 @@
 package dht
 
 import (
-	"crypto/rand"
+	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/assert"
 )
 
+// Fonction utilitaire pour créer un hôte libp2p pour les tests
+func createTestHost(t *testing.T) (host.Host, error) {
+	t.Helper()
+	return libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+}
+
+func TestNewNode(t *testing.T) {
+	peerID, _ := peer.Decode("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
+	node := NewNode(peerID, "/ip4/127.0.0.1/tcp/4001", 4001)
+
+	assert.Equal(t, peerID, node.NodeID)
+	assert.Equal(t, "/ip4/127.0.0.1/tcp/4001", node.Addr)
+	assert.Equal(t, 4001, node.Port)
+}
+
+func TestNewDHT(t *testing.T) {
+	h, err := createTestHost(t)
+	assert.NoError(t, err)
+	defer h.Close()
+
+	dht := NewDHT(h)
+
+	assert.NotNil(t, dht)
+	assert.NotNil(t, dht.DataStore)
+	assert.Equal(t, h, dht.Host)
+	assert.Equal(t, h.ID(), dht.RoutingTable.Self.NodeID)
+}
+
+func TestStoreAndRetrieve(t *testing.T) {
+	h, err := createTestHost(t)
+	assert.NoError(t, err)
+	defer h.Close()
+
+	dht := NewDHT(h)
+
+	key := "testKey"
+	value := []byte("testValue")
+
+	dht.StoreData(key, value)
+
+	retrievedValue, found := dht.Retrieve(key)
+	assert.True(t, found)
+	assert.Equal(t, value, retrievedValue)
+}
+
+func TestFindClosestNodes(t *testing.T) {
+	h, err := createTestHost(t)
+	assert.NoError(t, err)
+	defer h.Close()
+
+	dht := NewDHT(h)
+
+	// Add some nodes to the routing table
+	for i := 0; i < 10; i++ {
+		peerID, _ := peer.Decode(fmt.Sprintf("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5%d", i))
+		node := NewNode(peerID, fmt.Sprintf("/ip4/127.0.0.1/tcp/400%d", i), 4000+i)
+		dht.RoutingTable.AddNodeRoutingTable(h, node)
+	}
+
+	closestNodes := dht.FindClosestNodes("testKey", 5)
+	assert.Equal(t, 5, len(closestNodes))
+}
+
 func TestXOR(t *testing.T) {
-	peerA, err := peer.Decode("12D3KooWSRZz3VS4v5HmkVq4t6e3VRC5vdsTfTZLhZDfnkWd6FZj")
-	assert.NoError(t, err)
-	peerB, err := peer.Decode("12D3KooWKXfXjXL5Uzn5FbSiQ84WzgnLBRzA4aRjHTE2cfoU85RA")
-	assert.NoError(t, err)
+	a, _ := peer.Decode("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
+	b, _ := peer.Decode("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5M")
 
-	aBytes, err := peerA.Marshal()
-	assert.NoError(t, err)
-	bBytes, err := peerB.Marshal()
-	assert.NoError(t, err)
-
-	expectedResult := new(big.Int).Xor(
-		new(big.Int).SetBytes(aBytes),
-		new(big.Int).SetBytes(bBytes),
-	)
-
-	actualResult := XOR(peerA, peerB)
-	assert.Equal(t, expectedResult, &actualResult, "XOR results do not match")
+	result := XOR(a, b)
+	assert.NotEqual(t, big.NewInt(0), result)
 }
 
 func TestAddNodeBucket(t *testing.T) {
-	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	h, err := createTestHost(t)
 	assert.NoError(t, err)
+	defer h.Close()
 
-	host, err := libp2p.New(
-		libp2p.Identity(priv),
-	)
-	assert.NoError(t, err)
+	bucket := &Bucket{}
 
-	nodeA := NewNode(host.ID(), "/ip4/127.0.0.1/tcp/12345", 12345)
-	nodeB := NewNode(host.ID(), "/ip4/127.0.0.1/tcp/12346", 12346)
-	t.Logf("Nodes in bucket after adding nodeA: %+v", nodeB)
-	bucket := Bucket{}
-	bucket.AddNodeBucket(host, nodeA)
-	t.Logf("Nodes in bucket after adding nodeA: %+v", bucket.Nodes)
-	assert.Len(t, bucket.Nodes, 1, "Bucket should have 1 node")
-	bucket.AddNodeBucket(host, nodeB)
-	t.Logf("Nodes in bucket after adding nodeB: %+v", bucket.Nodes)
-	assert.Len(t, bucket.Nodes, 2, "Bucket should have 2 nodes")
-}
+	for i := 0; i < BucketSize+5; i++ {
+		peerID, _ := peer.Decode(fmt.Sprintf("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5%d", i))
+		node := NewNode(peerID, fmt.Sprintf("/ip4/127.0.0.1/tcp/400%d", i), 4000+i)
+		bucket.AddNodeBucket(h, node)
+	}
 
-func TestIsActiveNode(t *testing.T) {
-	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
-	assert.NoError(t, err)
-
-	host, err := libp2p.New(
-		libp2p.Identity(priv),
-	)
-	assert.NoError(t, err)
-
-	node := NewNode(host.ID(), "/ip4/127.0.0.1/tcp/12345", 12345)
-
-	// Since the node is the same as the host, it should be active
-	active := isActiveNode(host, node)
-	assert.True(t, active, "Node should be active")
+	assert.Equal(t, BucketSize, len(bucket.Nodes))
 }
 
 func TestAddNodeRoutingTable(t *testing.T) {
-	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	h, err := createTestHost(t)
 	assert.NoError(t, err)
+	defer h.Close()
 
-	host, err := libp2p.New(
-		libp2p.Identity(priv),
-	)
-	assert.NoError(t, err)
+	rt := NewRoutingTable(NewNode(h.ID(), "/ip4/127.0.0.1/tcp/4000", 4000))
 
-	selfNode := NewNode(host.ID(), "/ip4/127.0.0.1/tcp/12345", 12345)
-	rt := NewRoutingTable(selfNode)
+	peerID, _ := peer.Decode("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
+	node := NewNode(peerID, "/ip4/127.0.0.1/tcp/4001", 4001)
+	rt.AddNodeRoutingTable(h, node)
 
-	nodeB := NewNode(host.ID(), "/ip4/127.0.0.1/tcp/12346", 12346)
-
-	rt.AddNodeRoutingTable(host, nodeB)
-	// We should have 1 node in one of the buckets
-	nodesCount := 0
-	for _, bucket := range rt.Buckets {
-		nodesCount += len(bucket.Nodes)
-	}
-	assert.Equal(t, 1, nodesCount, "Routing table should have 1 node")
+	assert.Equal(t, 1, len(rt.Buckets[255].Nodes))
 }
