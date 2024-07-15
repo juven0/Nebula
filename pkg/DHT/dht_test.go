@@ -65,13 +65,19 @@ func TestFindClosestNodes(t *testing.T) {
 
 	// Add some nodes to the routing table
 	for i := 0; i < 10; i++ {
-		peerID, _ := peer.Decode(fmt.Sprintf("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5%d", i))
+		peerID, err := peer.Decode(fmt.Sprintf("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5%d", i))
+		assert.NoError(t, err)
 		node := NewNode(peerID, fmt.Sprintf("/ip4/127.0.0.1/tcp/400%d", i), 4000+i)
 		dht.RoutingTable.AddNodeRoutingTable(h, node)
+		t.Logf("Added node %d: %s", i, peerID)
 	}
 
 	closestNodes := dht.FindClosestNodes("testKey", 5)
-	assert.Equal(t, 5, len(closestNodes))
+	assert.Equal(t, 5, len(closestNodes), "Should find 5 closest nodes")
+
+	for i, node := range closestNodes {
+		t.Logf("Closest node %d: %s", i, node.NodeID)
+	}
 }
 
 func TestXOR(t *testing.T) {
@@ -89,15 +95,36 @@ func TestAddNodeBucket(t *testing.T) {
 
 	bucket := &Bucket{}
 
-	for i := 0; i < BucketSize+5; i++ {
+	t.Logf("BucketSize constant: %d", BucketSize)
+
+	for i := 0; i < 30; i++ { // Essayons d'ajouter plus de nœuds que BucketSize
 		peerID, _ := peer.Decode(fmt.Sprintf("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5%d", i))
 		node := NewNode(peerID, fmt.Sprintf("/ip4/127.0.0.1/tcp/400%d", i), 4000+i)
 		bucket.AddNodeBucket(h, node)
+
+		t.Logf("After adding node %d, bucket size: %d", i+1, len(bucket.Nodes))
 	}
 
-	assert.Equal(t, BucketSize, len(bucket.Nodes))
+	assert.Equal(t, BucketSize, len(bucket.Nodes), "Bucket size should be equal to BucketSize")
+
+	for i, node := range bucket.Nodes {
+		t.Logf("Node %d: %s", i, node.NodeID)
+	}
 }
 
+func TestAddNodeBucketDirectly(t *testing.T) {
+	bucket := &Bucket{}
+	h, _ := createTestHost(t)
+
+	for i := 0; i < 30; i++ {
+		peerID, _ := peer.Decode(fmt.Sprintf("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5%d", i))
+		node := NewNode(peerID, fmt.Sprintf("/ip4/127.0.0.1/tcp/400%d", i), 4000+i)
+		bucket.AddNodeBucket(h, node)
+		t.Logf("After adding node %d, bucket size: %d", i+1, len(bucket.Nodes))
+	}
+
+	assert.Equal(t, BucketSize, len(bucket.Nodes), "Bucket size should be equal to BucketSize")
+}
 func TestAddNodeRoutingTable(t *testing.T) {
 	h, err := createTestHost(t)
 	assert.NoError(t, err)

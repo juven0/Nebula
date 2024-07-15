@@ -23,7 +23,7 @@ type messageType int
 
 const (
 	IdLength   = 256 / 8
-	BucketSize = 20
+	BucketSize = 10
 )
 
 const (
@@ -177,19 +177,16 @@ func (dht *DHT) StoreData(key string, value []byte) {
 }
 
 func (dht *DHT) FindClosestNodes(key string, count int) []Node {
-	// Convertir la clé en un ID de nœud pour le calcul de distance
-	keyID := peer.ID(key)
-
+	keyID, _ := peer.Decode(key)
 	var allNodes []Node
 	for _, bucket := range dht.RoutingTable.Buckets {
 		allNodes = append(allNodes, bucket.Nodes...)
 	}
 
-	// Trier les nœuds par distance par rapport à la clé
 	sort.Slice(allNodes, func(i, j int) bool {
 		distI := XOR(keyID, allNodes[i].NodeID)
 		distJ := XOR(keyID, allNodes[j].NodeID)
-		return distI.Cmp(&distJ) < 0
+		return distI.Cmp(distJ) < 0
 	})
 
 	if len(allNodes) < count {
@@ -197,7 +194,6 @@ func (dht *DHT) FindClosestNodes(key string, count int) []Node {
 	}
 	return allNodes[:count]
 }
-
 func encodePeers(nodes []Node) []byte {
 	var encodedNodes [][]byte
 	for _, node := range nodes {
@@ -208,45 +204,32 @@ func encodePeers(nodes []Node) []byte {
 	return encoded
 }
 
-func XOR(a, b peer.ID) big.Int {
-	aBytes, err := a.Marshal()
-	if err != nil {
-		log.Fatalf("failed to marshal peer.ID a: %v", err)
-	}
-	bBytes, err := b.Marshal()
-	if err != nil {
-		log.Fatalf("failed to marshal peer.ID b: %v", err)
-	}
+func XOR(a, b peer.ID) *big.Int {
+	aBytes, _ := a.MarshalBinary()
+	bBytes, _ := b.MarshalBinary()
 
 	aInt := new(big.Int).SetBytes(aBytes)
 	bInt := new(big.Int).SetBytes(bBytes)
 
-	return *new(big.Int).Xor(aInt, bInt)
+	return new(big.Int).Xor(aInt, bInt)
 }
 
 func (bucket *Bucket) AddNodeBucket(host host.Host, node Node) {
-	// Check if the node is already in the bucket
+	// Vérifier si le nœud est déjà dans le bucket
 	for _, n := range bucket.Nodes {
 		if n.NodeID == node.NodeID {
 			return
 		}
 	}
 
-	// Add the node to the bucket if there's space
+	// Si le bucket n'est pas plein, ajouter simplement le nœud
 	if len(bucket.Nodes) < BucketSize {
 		bucket.Nodes = append(bucket.Nodes, node)
-	} else {
-		// If the bucket is full, check for inactive nodes
-		for i, existingNode := range bucket.Nodes {
-			if !isActiveNode(host, existingNode) {
-				bucket.Nodes[i] = node
-				return
-			}
-		}
-
-		// If no inactive nodes are found, evict the oldest node (the first one)
-		bucket.Nodes = append(bucket.Nodes[1:], node)
+		return
 	}
+
+	// Le bucket est plein, remplacer le nœud le plus ancien
+	bucket.Nodes = append(bucket.Nodes[1:], node)
 }
 
 func isActiveNode(h host.Host, node Node) bool {
@@ -288,9 +271,11 @@ func NewRoutingTable(self Node) *RoutingTable {
 	}
 	return rt
 }
-
 func (rt *RoutingTable) AddNodeRoutingTable(host host.Host, node Node) {
 	dist := XOR(rt.Self.NodeID, node.NodeID)
 	bucketIndex := dist.BitLen() - 1
+	if bucketIndex >= len(rt.Buckets) {
+		bucketIndex = len(rt.Buckets) - 1
+	}
 	rt.Buckets[bucketIndex].AddNodeBucket(host, node)
 }
