@@ -215,20 +215,17 @@ func XOR(a, b peer.ID) *big.Int {
 }
 
 func (bucket *Bucket) AddNodeBucket(host host.Host, node Node) {
-	// Vérifier si le nœud est déjà dans le bucket
 	for _, n := range bucket.Nodes {
 		if n.NodeID == node.NodeID {
 			return
 		}
 	}
 
-	// Si le bucket n'est pas plein, ajouter simplement le nœud
 	if len(bucket.Nodes) < BucketSize {
 		bucket.Nodes = append(bucket.Nodes, node)
 		return
 	}
 
-	// Le bucket est plein, remplacer le nœud le plus ancien
 	bucket.Nodes = append(bucket.Nodes[1:], node)
 }
 
@@ -241,7 +238,6 @@ func isActiveNode(h host.Host, node Node) bool {
 		Addrs: []multiaddr.Multiaddr{multiaddr.StringCast(node.Addr)},
 	}
 
-	// Connect to the node
 	if err := h.Connect(ctx, peerInfo); err != nil {
 		log.Println("Failed to connect to peer:", err)
 		return false

@@ -1,11 +1,13 @@
 package dht
 
 import (
+	"crypto/rand"
 	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/assert"
@@ -56,6 +58,15 @@ func TestStoreAndRetrieve(t *testing.T) {
 	assert.Equal(t, value, retrievedValue)
 }
 
+func generatePeerID(t *testing.T) peer.ID {
+	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	assert.NoError(t, err)
+
+	peerID, err := peer.IDFromPrivateKey(priv)
+	assert.NoError(t, err)
+
+	return peerID
+}
 func TestFindClosestNodes(t *testing.T) {
 	h, err := createTestHost(t)
 	assert.NoError(t, err)
@@ -63,10 +74,11 @@ func TestFindClosestNodes(t *testing.T) {
 
 	dht := NewDHT(h)
 
-	// Add some nodes to the routing table
 	for i := 0; i < 10; i++ {
-		peerID, err := peer.Decode(fmt.Sprintf("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5%d", i))
+		// Générer un ID de pair valide
+		peerID := generatePeerID(t)
 		assert.NoError(t, err)
+
 		node := NewNode(peerID, fmt.Sprintf("/ip4/127.0.0.1/tcp/400%d", i), 4000+i)
 		dht.RoutingTable.AddNodeRoutingTable(h, node)
 		t.Logf("Added node %d: %s", i, peerID)
