@@ -1,4 +1,4 @@
-package dht
+package maindht
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"math/rand"
 	"sort"
 
 	//"os/exec"
@@ -158,24 +159,6 @@ func (dht *DHT) Retrieve(key string) ([]byte, bool) {
 	return nil, false
 }
 
-func (dht *DHT) StoreData(key string, value []byte) {
-	dht.DataStore[key] = value
-
-	closestNodes := dht.FindClosestNodes(key, BucketSize)
-	for _, node := range closestNodes {
-		msg := Message{
-			Type:   STORE,
-			Key:    key,
-			Value:  value,
-			Sender: dht.RoutingTable.Self,
-		}
-		_, err := dht.SendMessage(node.NodeID, msg)
-		if err != nil {
-			log.Printf("Failed to store data on node %s: %v", node.NodeID, err)
-		}
-	}
-}
-
 func (dht *DHT) FindClosestNodes(key string, count int) []Node {
 	keyID, _ := peer.Decode(key)
 	var allNodes []Node
@@ -274,4 +257,113 @@ func (rt *RoutingTable) AddNodeRoutingTable(host host.Host, node Node) {
 		bucketIndex = len(rt.Buckets) - 1
 	}
 	rt.Buckets[bucketIndex].AddNodeBucket(host, node)
+}
+
+func (dht *DHT) FindNode(key string) []Node {
+	closestNodes := dht.FindClosestNodes(key, BucketSize)
+	queried := make(map[peer.ID]bool)
+
+	for {
+		unqueriedNodes := make([]Node, 0)
+
+		for _, node := range closestNodes {
+			if !queried[node.NodeID] {
+				unqueriedNodes = append(unqueriedNodes, node)
+			}
+		}
+
+		if len(unqueriedNodes) == 0 {
+			break
+		}
+
+		for _, node := range unqueriedNodes {
+			queried[node.NodeID] = true
+			msg := Message{
+				Type:   FIND_NODE,
+				Key:    key,
+				Sender: dht.RoutingTable.Self,
+			}
+
+			rsp, err := dht.SendMessage(node.NodeID, msg)
+			if err != nil {
+				continue
+			}
+			var newNodes []Node
+			json.Unmarshal(rsp.Value, &newNodes)
+			for _, newNode := range newNodes {
+				dht.RoutingTable.AddNodeRoutingTable(dht.Host, newNode)
+				if !queried[newNode.NodeID] {
+					closestNodes = append(closestNodes, newNode)
+				}
+			}
+		}
+
+		sort.Slice(closestNodes, func(i, j int) bool {
+			distI := XOR(peer.ID(key), closestNodes[i].NodeID)
+			distJ := XOR(peer.ID(key), closestNodes[j].NodeID)
+			return distI.Cmp(distJ) < 0
+		})
+		if len(closestNodes) > BucketSize {
+			closestNodes = closestNodes[:BucketSize]
+		}
+	}
+	return closestNodes
+}
+
+func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
+	for _, peerInfo := range bootstrapPeer {
+		err := dht.Host.Connect(context.Background(), peerInfo)
+		if err != nil {
+			log.Printf("Failed to connect to bootstrap peer %s: %v", peerInfo.ID, err)
+			continue
+		}
+		dht.RoutingTable.AddNodeRoutingTable(dht.Host, NewNode(peerInfo.ID, peerInfo.Addrs[0].String(), 0))
+		dht.FindNode(dht.RoutingTable.Self.NodeID.String())
+	}
+	return nil
+}
+
+func (dht *DHT) StoreData(key string, value []byte) {
+	dht.DataStore[key] = value
+
+	closestNodes := dht.FindNode(key)
+	for _, node := range closestNodes[:min(len(closestNodes), BucketSize)] {
+		msg := Message{
+			Type:   STORE,
+			Key:    key,
+			Value:  value,
+			Sender: dht.RoutingTable.Self,
+		}
+		_, err := dht.SendMessage(node.NodeID, msg)
+		if err != nil {
+			log.Printf("Failed to store data on node %s: %v", node.NodeID, err)
+		}
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func (dht *DHT) RefreshBuckets() {
+	for i := range dht.RoutingTable.Buckets {
+		randomID := generateRandomID(i)
+		dht.FindNode(randomID)
+	}
+}
+
+func generateRandomID(prefixLen int) string {
+	id := make([]byte, IdLength)
+	for i := 0; i < prefixLen; i++ {
+		id[i/8] |= 1 << (7 - i%8)
+	}
+	for i := prefixLen; i < IdLength*8; i++ {
+		if rand.Intn(2) == 0 {
+			id[i/8] |= 1 << (7 - i%8)
+		}
+	}
+	return peer.ID(id).String()
 }
