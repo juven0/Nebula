@@ -407,3 +407,19 @@ func (dht *DHT) RetrieveFile(hash string) (*File, []byte, error) {
 	data := value[:256]
 	return &file, data, nil
 }
+
+func (dht *DHT) UpdateFile(File File, data []byte, UpdaterID peer.ID) error {
+	existingFile, _, err := dht.RetrieveFile(File.Hash)
+	if err != nil {
+		return err
+	}
+
+	if existingFile.OwnerID != UpdaterID {
+		return fmt.Errorf("permission denied: only the owner can update the file")
+	}
+	return dht.StoreFile(File, data)
+}
+
+func (dht *DHT) DeleteFile(hash string, DeleterID peer.ID) {
+
+}
