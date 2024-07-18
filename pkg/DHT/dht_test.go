@@ -150,3 +150,24 @@ func TestAddNodeRoutingTable(t *testing.T) {
 
 	assert.Equal(t, 1, len(rt.Buckets[255].Nodes))
 }
+
+func TestBootstrap(t *testing.T) {
+	h1, _ := createTestHost(t)
+	h2, _ := createTestHost(t)
+	defer h1.Close()
+	defer h2.Close()
+
+	dht1 := NewDHT(h1)
+	// dht2 := NewDHT(h2)
+
+	bootstrapPeers := []peer.AddrInfo{
+		{
+			ID:    h2.ID(),
+			Addrs: h2.Addrs(),
+		},
+	}
+
+	err := dht1.Bootstrap(bootstrapPeers)
+	assert.NoError(t, err)
+	assert.Contains(t, dht1.FindClosestNodes(h2.ID().String(), 1), NewNode(h2.ID(), h2.Addrs()[0].String(), 0))
+}

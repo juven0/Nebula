@@ -61,6 +61,15 @@ type Message struct {
 	Sender Node
 }
 
+type File struct {
+	Name       string
+	Size       int64
+	Hash       string
+	OwnerID    peer.ID
+	Permission int
+	Timestamp  time.Time
+}
+
 func NewNode(peerID peer.ID, addr string, port int) Node {
 	return Node{
 		NodeID: peerID,
@@ -339,6 +348,7 @@ func (dht *DHT) StoreData(key string, value []byte) {
 			log.Printf("Failed to store data on node %s: %v", node.NodeID, err)
 		}
 	}
+
 }
 
 func min(a, b int) int {
@@ -366,4 +376,34 @@ func generateRandomID(prefixLen int) string {
 		}
 	}
 	return peer.ID(id).String()
+}
+
+func (dht *DHT) StoreFile(file File, data []byte) error {
+	fileJson, err := json.Marshal(file)
+	if err != nil {
+		return err
+	}
+
+	key := file.Hash
+	value := append(fileJson, data...)
+	dht.StoreData(key, value)
+
+	return nil
+}
+
+func (dht *DHT) RetrieveFile(hash string) (*File, []byte, error) {
+	value, found := dht.Retrieve(hash)
+	if !found {
+		return nil, nil, fmt.Errorf("file not found")
+	}
+
+	var file File
+	err := json.Unmarshal(value[:256], &file)
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to unmarshal file metadata: %v", err)
+	}
+
+	data := value[:256]
+	return &file, data, nil
 }
