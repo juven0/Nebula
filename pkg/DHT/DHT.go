@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"math/rand"
 	"sort"
+	"sync"
 
 	//"os/exec"
 	//"strings"
@@ -53,6 +54,25 @@ type DHT struct {
 	RoutingTable RoutingTable
 	DataStore    map[string][]byte
 	Host         host.Host
+	Blockchain   *Blockchain
+	mu           sync.RWMutex
+	stopCh       chan struct{}
+	// config DHT
+	metrics DHTMetrics
+	logger  *log.Logger
+}
+
+type DHTConfig struct {
+	BucketSize      int
+	Alpha           int // Nombre de requêtes parallèles pour les opérations de lookup
+	RefreshInterval time.Duration
+}
+
+type DHTMetrics struct {
+	TotalRequests     int64
+	SuccessfulLookups int64
+	FailedLookups     int64
+	StorageUsage      int64
 }
 
 type Message struct {
