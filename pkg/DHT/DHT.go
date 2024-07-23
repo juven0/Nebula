@@ -31,6 +31,7 @@ const (
 	STORE messageType = iota
 	FIND_VALUE
 	FIND_NODE
+	DELETE_FILE
 )
 
 type Node struct {
@@ -133,6 +134,9 @@ func (dht *DHT) HandelIncommingMessages() {
 		case FIND_NODE:
 			closestNodes := dht.FindClosestNodes(msg.Key, BucketSize)
 			response = Message{Type: FIND_NODE, Key: msg.Key, Value: encodePeers(closestNodes)}
+		case DELETE_FILE:
+			delete(dht.DataStore, msg.Key)
+			response = Message{Type: DELETE_FILE, Key: msg.Key}
 		}
 
 		if err := json.NewEncoder(stream).Encode(response); err != nil {
@@ -420,6 +424,44 @@ func (dht *DHT) UpdateFile(File File, data []byte, UpdaterID peer.ID) error {
 	return dht.StoreFile(File, data)
 }
 
-func (dht *DHT) DeleteFile(hash string, DeleterID peer.ID) {
+func (dht *DHT) DeleteFile(hash string, deleterID peer.ID) error {
+	file, _, err := dht.RetrieveFile(hash)
+	if err != nil {
+		return err
+	}
 
+	if file.OwnerID != deleterID {
+		return fmt.Errorf("permission denied: only the owner can update the file")
+	}
+	delete(dht.DataStore, hash)
+
+	deleteMsg := Message{
+		Type:   DELETE_FILE,
+		Key:    hash,
+		Sender: dht.RoutingTable.Self,
+	}
+	closestNodes := dht.FindClosestNodes(hash, BucketSize)
+
+	for _, node := range closestNodes {
+		go func(n Node) {
+			_, err := dht.SendMessage(n.NodeID, deleteMsg)
+			if err != nil {
+				log.Printf("Failed to send delete message to node %s: %v", n.NodeID, err)
+			}
+		}(node)
+	}
+	return nil
+}
+func (dht *DHT) ListUserFiles(ownerID peer.ID) ([]File, error) {
+	var userFiles []File
+
+	for _, value := range dht.DataStore {
+		var file File
+		err := json.Unmarshal(value[:256], &file)
+		if err == nil && file.OwnerID == ownerID {
+			userFiles = append(userFiles, file)
+		}
+	}
+
+	return userFiles, nil
 }
