@@ -7,7 +7,9 @@ import (
 	"log"
 	"math/big"
 	"math/rand"
+	"os"
 	"sort"
+	"strconv"
 	"sync"
 
 	//"os/exec"
@@ -33,6 +35,10 @@ const (
 	FIND_VALUE
 	FIND_NODE
 	DELETE_FILE
+	BLOCKCHAIN_BLOCKS_RESPONSE
+	BLOCKCHAIN_BLOCKS_REQUEST
+	BLOCKCHAIN_LENGTH_REQUEST
+	BLOCKCHAIN_LENGTH_RESPONSE
 )
 
 type Node struct {
@@ -51,15 +57,15 @@ type RoutingTable struct {
 }
 
 type DHT struct {
-	RoutingTable RoutingTable
+	RoutingTable *RoutingTable
 	DataStore    map[string][]byte
 	Host         host.Host
 	Blockchain   *Blockchain
 	mu           sync.RWMutex
 	stopCh       chan struct{}
-	// config DHT
-	metrics DHTMetrics
-	logger  *log.Logger
+	config       DHTConfig
+	metrics      DHTMetrics
+	logger       *log.Logger
 }
 
 type DHTConfig struct {
@@ -99,15 +105,29 @@ func NewNode(peerID peer.ID, addr string, port int) Node {
 	}
 }
 
-func NewDHT(h host.Host) *DHT {
-	selfNode := NewNode(h.ID(), h.Addrs()[0].String(), 0)
+func NewDHT(cfg DHTConfig, h host.Host) *DHT {
+	// Créer un Node à partir de l'host
+	selfNode := NewNode(h.ID(), h.Addrs()[0].String(), 0) // Nous utilisons 0 comme port par défaut ici
 
 	return &DHT{
-		RoutingTable: *NewRoutingTable(selfNode),
 		DataStore:    make(map[string][]byte),
+		RoutingTable: NewRoutingTable(selfNode, cfg.BucketSize),
 		Host:         h,
+		Blockchain:   NewBlockchain(),
+		stopCh:       make(chan struct{}),
+		logger:       log.New(os.Stdout, "DHT: ", log.Ldate|log.Ltime|log.Lshortfile),
 	}
 }
+
+// func NewDHT(h host.Host) *DHT {
+// 	selfNode := NewNode(h.ID(), h.Addrs()[0].String(), 0)
+
+// 	return &DHT{
+// 		RoutingTable: *NewRoutingTable(selfNode),
+// 		DataStore:    make(map[string][]byte),
+// 		Host:         h,
+// 	}
+// }
 
 func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 	stream, err := dht.Host.NewStream(context.Background(), to, "/dht/1.0.0")
@@ -157,6 +177,16 @@ func (dht *DHT) HandelIncommingMessages() {
 		case DELETE_FILE:
 			delete(dht.DataStore, msg.Key)
 			response = Message{Type: DELETE_FILE, Key: msg.Key}
+
+		case BLOCKCHAIN_LENGTH_REQUEST:
+			length := len(dht.Blockchain.Blocks)
+			response = Message{Type: BLOCKCHAIN_LENGTH_RESPONSE, Value: []byte(strconv.Itoa(length))}
+		case BLOCKCHAIN_BLOCKS_REQUEST:
+			start, _ := strconv.Atoi(string(msg.Value[:32]))
+			end, _ := strconv.Atoi(string(msg.Value[32:]))
+			blocks := dht.Blockchain.Blocks[start:end]
+			blocksData, _ := json.Marshal(blocks)
+			response = Message{Type: BLOCKCHAIN_BLOCKS_RESPONSE, Value: blocksData}
 		}
 
 		if err := json.NewEncoder(stream).Encode(response); err != nil {
@@ -274,15 +304,16 @@ func isActiveNode(h host.Host, node Node) bool {
 	}
 }
 
-func NewRoutingTable(self Node) *RoutingTable {
+func NewRoutingTable(self Node, bucketSize int) *RoutingTable {
 	rt := &RoutingTable{
 		Self: self,
 	}
 	for i := range rt.Buckets {
-		rt.Buckets[i] = Bucket{Nodes: []Node{}}
+		rt.Buckets[i] = Bucket{Nodes: make([]Node, 0, bucketSize)}
 	}
 	return rt
 }
+
 func (rt *RoutingTable) AddNodeRoutingTable(host host.Host, node Node) {
 	dist := XOR(rt.Self.NodeID, node.NodeID)
 	bucketIndex := dist.BitLen() - 1
@@ -341,6 +372,10 @@ func (dht *DHT) FindNode(key string) []Node {
 		}
 	}
 	return closestNodes
+}
+
+func (dht *DHT) initRoutingTable() error {
+	return nil
 }
 
 func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
