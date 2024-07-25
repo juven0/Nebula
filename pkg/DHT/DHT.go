@@ -379,16 +379,60 @@ func (dht *DHT) initRoutingTable() error {
 }
 
 func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
+	var wg sync.WaitGroup
+
+	successfulConnections := 0
+	var mu sync.RWMutex
+
 	for _, peerInfo := range bootstrapPeer {
-		err := dht.Host.Connect(context.Background(), peerInfo)
-		if err != nil {
-			log.Printf("Failed to connect to bootstrap peer %s: %v", peerInfo.ID, err)
-			continue
-		}
-		dht.RoutingTable.AddNodeRoutingTable(dht.Host, NewNode(peerInfo.ID, peerInfo.Addrs[0].String(), 0))
-		dht.FindNode(dht.RoutingTable.Self.NodeID.String())
+		wg.Add(1)
+		go func(peer peer.AddrInfo) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 30)
+			defer cancel()
+
+			err := dht.Host.Connect(ctx, peer)
+			if err != nil {
+				log.Printf("Failed to connect to bootstrap peer %s: %v", peer.ID, err)
+				return
+			}
+
+			mu.Lock()
+			successfulConnections++
+			mu.Unlock()
+
+			dht.RoutingTable.AddNodeRoutingTable(dht.Host, NewNode(peer.ID, peer.Addrs[0].String(), 0))
+
+			closestNodes := dht.FindNode(peer.ID.String())
+			for _, node := range closestNodes {
+				dht.RoutingTable.AddNodeRoutingTable(dht.Host, node)
+			}
+
+			ownClosestNodes := dht.FindNode(dht.RoutingTable.Self.NodeID.String())
+			for _, node := range ownClosestNodes {
+				dht.RoutingTable.AddNodeRoutingTable(dht.Host, node)
+			}
+		}(peerInfo)
 	}
+	wg.Wait()
+
+	if successfulConnections == 0 {
+		return fmt.Errorf("failed to connect to any bootstrap peers")
+	}
+
+	log.Printf("Successfully bootstrapped with %d peers", successfulConnections)
 	return nil
+
+	// for _, peerInfo := range bootstrapPeer {
+	// 	err := dht.Host.Connect(context.Background(), peerInfo)
+	// 	if err != nil {
+	// 		log.Printf("Failed to connect to bootstrap peer %s: %v", peerInfo.ID, err)
+	// 		continue
+	// 	}
+	// 	dht.RoutingTable.AddNodeRoutingTable(dht.Host, NewNode(peerInfo.ID, peerInfo.Addrs[0].String(), 0))
+	// 	dht.FindNode(dht.RoutingTable.Self.NodeID.String())
+	// }
+	// return nil
 }
 
 func (dht *DHT) StoreData(key string, value []byte) {
