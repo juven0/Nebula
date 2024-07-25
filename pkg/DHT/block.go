@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type Block struct {
@@ -178,7 +180,10 @@ func (dht *DHT) getRemoteBlocks(node Node, start, end int) ([]*Block, error) {
 	return blocks, nil
 }
 
-func (dht *DHT) Start() error {
+func (dht *DHT) Start(bootstrapPeers []peer.AddrInfo) error {
+	dht.mu.Lock()
+	defer dht.mu.Unlock()
+
 	if dht.stopCh == nil {
 		dht.stopCh = make(chan struct{})
 	}
@@ -191,9 +196,24 @@ func (dht *DHT) Start() error {
 	dht.HandelIncommingMessages()
 	dht.periodicSync()
 	dht.periodicRefresh()
-	dht.periodicMaintenance()
+	// dht.periodicMaintenance()
 
-	// err = dht.Bootstrap(dht.RoutingTable.Buckets.)
+	err = dht.Bootstrap(bootstrapPeers)
+	if err != nil {
+		return fmt.Errorf("failed to bootstrap DHT: %w", err)
+	}
+	dht.logger.Println("DHT started successfully")
+	return nil
+}
+
+func (dht *DHT) Stop() error {
+	dht.mu.Lock()
+	defer dht.mu.Unlock()
+
+	close(dht.stopCh)
+
+	dht.logger.Println("DHT stopped")
+
 	return nil
 }
 
@@ -228,16 +248,18 @@ func (dht *DHT) periodicRefresh() {
 	}
 }
 
-func (dht *DHT) periodicMaintenance() {
-	ticker := time.NewTicker(10 * time.Minute)
-	defer ticker.Stop()
+//a faire
 
-	for {
-		select {
-		case <-ticker.C:
-			dht.performMaintenance()
-		case <-dht.stopCh:
-			return
-		}
-	}
-}
+// func (dht *DHT) periodicMaintenance() {
+// 	ticker := time.NewTicker(10 * time.Minute)
+// 	defer ticker.Stop()
+
+// 	for {
+// 		select {
+// 		case <-ticker.C:
+// 			dht.performMaintenance()
+// 		case <-dht.stopCh:
+// 			return
+// 		}
+// 	}
+// }
