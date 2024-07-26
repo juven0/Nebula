@@ -197,12 +197,15 @@ func (dht *DHT) HandelIncommingMessages() {
 }
 
 func (dht *DHT) Retrieve(key string) ([]byte, bool) {
+	dht.mu.RLock()
 	value, found := dht.DataStore[key]
+	dht.mu.RUnlock()
+
 	if found {
 		return value, true
 	}
 
-	closestNodes := dht.FindClosestNodes(key, BucketSize)
+	closestNodes := dht.FindClosestNodes(key, dht.config.Alpha)
 	for _, node := range closestNodes {
 		msg := Message{
 			Type:   FIND_VALUE,
