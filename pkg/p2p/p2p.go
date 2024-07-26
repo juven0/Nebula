@@ -7,6 +7,7 @@ import (
 	blockchains "nebula/internal/blockChains"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -21,12 +22,12 @@ import (
 type P2pNetwork struct {
 	Host    host.Host
 	Context context.Context
+	cancel  context.CancelFunc
 }
 
 func (p2pn *P2pNetwork) Init() error {
-	p2pn.Context = context.Background()
+	p2pn.Context, p2pn.cancel = context.WithCancel(context.Background())
 
-	//creat new hote
 	h, err := libp2p.New(
 		libp2p.ListenAddrStrings(
 			"/ip4/0.0.0.0/tcp/0",
@@ -35,122 +36,153 @@ func (p2pn *P2pNetwork) Init() error {
 		libp2p.NATPortMap(),
 		libp2p.EnableRelay(),
 	)
-
 	if err != nil {
-		log.Fatal(err)
-		return err
+		return fmt.Errorf("failed to create libp2p host: %w", err)
 	}
 	p2pn.Host = h
 	return nil
 }
-func (p2pn *P2pNetwork) Connecte(adress string) error {
 
-	///ip4/192.168.1.121/tcp/61979/p2p/12D3KooWAnaLwr2ksZMCvngJdTAhFsGdM2ytYuPuNnNpYWToz35J
+func (p2pn *P2pNetwork) Connect(address string) error {
+	peerAddr, err := multiaddr.NewMultiaddr(address)
+	if err != nil {
+		return fmt.Errorf("invalid multiaddress: %w", err)
+	}
 
-	perrAddr, err := multiaddr.NewMultiaddr(adress)
+	peerInfo, err := peer.AddrInfoFromP2pAddr(peerAddr)
 	if err != nil {
-		log.Fatal(err)
-		return err
+		return fmt.Errorf("failed to get peer info: %w", err)
 	}
-	peerInfo, err := peer.AddrInfoFromP2pAddr(perrAddr)
-	if err != nil {
-		log.Fatal(err)
-		return err
-	}
+
 	if err := p2pn.Host.Connect(p2pn.Context, *peerInfo); err != nil {
-		log.Fatal(err)
-		return err
-	} else {
-		fmt.Println("Connexion réussie à :", peerInfo)
+		return fmt.Errorf("failed to connect to peer: %w", err)
 	}
+
+	log.Printf("Successfully connected to: %s", peerInfo)
 	return nil
 }
 
 func (p2pn *P2pNetwork) Network() {
+	fileBlockchain := blockchains.InitializeFileBlockchain()
 
-	fileBLockchain := blockchains.InitializeFileBlockchain()
 	p2pn.Host.SetStreamHandler("/p2p/1.0.0", func(s network.Stream) {
-		blockchains.HandleFileStream(s, &fileBLockchain)
+		blockchains.HandleFileStream(s, &fileBlockchain)
 	})
 
-	p2pn.Host.SetStreamHandler("/p2p/1.0.0", handelStream)
+	p2pn.Host.SetStreamHandler("/p2p/1.0.0", handleStream)
+
 	for _, addr := range p2pn.Host.Addrs() {
-		fmt.Printf("Adresse d'écoute: %s\n", addr)
+		log.Printf("Listening address: %s", addr)
 	}
-	fmt.Printf("ID de pair: %s\n", p2pn.Host.ID())
+	log.Printf("Peer ID: %s", p2pn.Host.ID())
 
 	if len(os.Args) > 1 {
-		targetAddr, _ := multiaddr.NewMultiaddr(os.Args[1])
-		peerinfo, _ := peer.AddrInfoFromP2pAddr(targetAddr)
-		p2pn.Host.Peerstore().AddAddrs(peerinfo.ID, peerinfo.Addrs, peerstore.PermanentAddrTTL)
-		if err := p2pn.Host.Connect(p2pn.Context, *peerinfo); err != nil {
-			log.Println("Erreur lors de la connexion:", err)
-			return
+		if err := p2pn.connectToPeer(os.Args[1]); err != nil {
+			log.Printf("Failed to connect to peer: %v", err)
 		}
-		sendMessage(p2pn.Host, *peerinfo, "Bonjour depuis "+p2pn.Host.ID().String())
 	}
 
-	go func() {
-		for {
-			time.Sleep(10 * time.Second)
-			peers := p2pn.Host.Peerstore().Peers()
-			fmt.Println("Nombre de pairs connectés:", len(peers))
-			for _, p := range peers {
-				addrs := p2pn.Host.Peerstore().Addrs(p)
-				fmt.Println("Pair:", p.String(), "Adresses:", addrs)
-			}
-		}
-	}()
-	// check all block ..
-	go func() {
-		for {
-			time.Sleep(10 * time.Second)
-			blockchains.DisplayTransactions(fileBLockchain)
-		}
-	}()
-	//
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go p2pn.monitorPeers(&wg)
+	// go p2pn.monitorBlockchain(&wg, fileBlockchain)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
 	p2pn.Stop()
-	//select {}
+	wg.Wait()
 }
 
 func (p2pn *P2pNetwork) Stop() {
-	fmt.Println("Stopping P2P network...")
+	log.Println("Stopping P2P network...")
+	p2pn.cancel()
 	if err := p2pn.Host.Close(); err != nil {
-		log.Println("Error closing the host:", err)
+		log.Printf("Error closing the host: %v", err)
 	} else {
-		fmt.Println("P2P network stopped.")
+		log.Println("P2P network stopped.")
 	}
 }
 
-func handelStream(s network.Stream) {
-	fmt.Println("new flux of :", s.Conn().RemotePeer())
+func handleStream(s network.Stream) {
+	defer s.Close()
+
+	log.Printf("New stream from: %s", s.Conn().RemotePeer())
 	buf := make([]byte, 1024)
 	n, err := s.Read(buf)
 	if err != nil {
-		log.Println("Erreur lors de la lecture du flux:", err)
+		log.Printf("Error reading from stream: %v", err)
 		return
 	}
-	fmt.Printf("Reçu: %s\n", string(buf[:n]))
-	s.Close()
+	log.Printf("Received: %s", string(buf[:n]))
 }
 
-func sendMessage(h host.Host, target peer.AddrInfo, message string) {
+func sendMessage(h host.Host, target peer.AddrInfo, message string) error {
 	s, err := h.NewStream(context.Background(), target.ID, "/p2p/1.0.0")
 	if err != nil {
-		log.Println("Erreur lors de la création du flux:", err)
-		return
+		return fmt.Errorf("failed to create stream: %w", err)
 	}
+	defer s.Close()
 
 	_, err = s.Write([]byte(message))
 	if err != nil {
-		log.Println("Erreur lors de l'envoi du message:", err)
-		s.Close()
-		return
+		return fmt.Errorf("failed to send message: %w", err)
 	}
-	s.Close()
+	return nil
 }
+
+func (p2pn *P2pNetwork) connectToPeer(targetAddr string) error {
+	maddr, err := multiaddr.NewMultiaddr(targetAddr)
+	if err != nil {
+		return fmt.Errorf("invalid multiaddress: %w", err)
+	}
+
+	peerInfo, err := peer.AddrInfoFromP2pAddr(maddr)
+	if err != nil {
+		return fmt.Errorf("failed to get peer info: %w", err)
+	}
+
+	p2pn.Host.Peerstore().AddAddrs(peerInfo.ID, peerInfo.Addrs, peerstore.PermanentAddrTTL)
+	if err := p2pn.Host.Connect(p2pn.Context, *peerInfo); err != nil {
+		return fmt.Errorf("failed to connect to peer: %w", err)
+	}
+
+	return sendMessage(p2pn.Host, *peerInfo, fmt.Sprintf("Hello from %s", p2pn.Host.ID()))
+}
+
+func (p2pn *P2pNetwork) monitorPeers(wg *sync.WaitGroup) {
+	defer wg.Done()
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			peers := p2pn.Host.Network().Peers()
+			log.Printf("Number of connected peers: %d", len(peers))
+			for _, p := range peers {
+				addrs := p2pn.Host.Peerstore().Addrs(p)
+				log.Printf("Peer: %s, Addresses: %v", p, addrs)
+			}
+		case <-p2pn.Context.Done():
+			return
+		}
+	}
+}
+
+// func (p2pn *P2pNetwork) monitorBlockchain(wg *sync.WaitGroup, blockchain blockchains.FileBlockchain) {
+// 	defer wg.Done()
+// 	ticker := time.NewTicker(10 * time.Second)
+// 	defer ticker.Stop()
+
+// 	for {
+// 		select {
+// 		case <-ticker.C:
+// 			blockchains.DisplayTransactions(blockchain)
+// 		case <-p2pn.Context.Done():
+// 			return
+// 		}
+// 	}
+// }
