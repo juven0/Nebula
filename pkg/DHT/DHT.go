@@ -69,9 +69,10 @@ type DHT struct {
 }
 
 type DHTConfig struct {
-	BucketSize      int
-	Alpha           int // Nombre de requêtes parallèles pour les opérations de lookup
-	RefreshInterval time.Duration
+	BucketSize        int
+	Alpha             int // Nombre de requêtes parallèles pour les opérations de lookup
+	RefreshInterval   time.Duration
+	ReplicationFactor int
 }
 
 type DHTMetrics struct {
@@ -435,23 +436,52 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 	// return nil
 }
 
-func (dht *DHT) StoreData(key string, value []byte) {
-	dht.DataStore[key] = value
+func (dht *DHT) StoreData(key string, value []byte) error {
+	dht.mu.Lock()
+	defer dht.mu.Unlock()
 
-	closestNodes := dht.FindNode(key)
-	for _, node := range closestNodes[:min(len(closestNodes), BucketSize)] {
-		msg := Message{
-			Type:   STORE,
-			Key:    key,
-			Value:  value,
-			Sender: dht.RoutingTable.Self,
-		}
-		_, err := dht.SendMessage(node.NodeID, msg)
-		if err != nil {
-			log.Printf("Failed to store data on node %s: %v", node.NodeID, err)
-		}
+	if _, exists := dht.DataStore[key]; exists {
+		return fmt.Errorf("key already exists: %s", key)
 	}
 
+	dht.DataStore[key] = value
+
+	closestNodes := dht.FindClosestNodes(key, dht.config.ReplicationFactor)
+	// closestNodes := dht.FindNode(key)
+
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(closestNodes))
+
+	for _, node := range closestNodes[:min(len(closestNodes), BucketSize)] {
+		wg.Add(1)
+		go func(n Node) {
+			defer wg.Done()
+			msg := Message{
+				Type:   STORE,
+				Key:    key,
+				Value:  value,
+				Sender: dht.RoutingTable.Self,
+			}
+			_, err := dht.SendMessage(node.NodeID, msg)
+			if err != nil {
+				errChan <- fmt.Errorf("failed to replicate on node %s: %v", n.NodeID, err)
+			}
+		}(node)
+
+	}
+	wg.Wait()
+	close(errChan)
+
+	var replicationErrors []error
+	for err := range errChan {
+		replicationErrors = append(replicationErrors, err)
+	}
+
+	if len(replicationErrors) > 0 {
+		return fmt.Errorf("replication errors occurred: %v", replicationErrors)
+	}
+
+	return nil
 }
 
 func min(a, b int) int {
