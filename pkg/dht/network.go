@@ -1,14 +1,37 @@
 package maindht
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"log"
+	"os"
 
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 )
+
+type mdnsNotifee struct {
+    h host.Host
+}
+
+func (n *mdnsNotifee) HandlePeerFound(pi peer.AddrInfo) {
+    if err := n.h.Connect(context.Background(), pi); err != nil {
+        log.Printf("Error connecting to peer: %s", err)
+    } else {
+        log.Printf("Connected to peer: %s", pi.ID)
+    }
+	
+}
+
 
 func (dht *DHT) JoinNetwork() error {
 
-	knowPeers := dht.loadKnowPeers()
+	knowPeers, err := dht.loadKnownPeers()
+	if err != nil {
+		return err
+	}
 	if len(knowPeers)>0 {
 		return dht.Bootstrap(knowPeers)
 	}
@@ -26,19 +49,75 @@ func (dht *DHT) JoinNetwork() error {
 	return fmt.Errorf("failed to join network: no peers found")
 }
 
-func (dht *DHT) loadKnowPeers() ([]peer.AddrInfo){
+func (dht *DHT) loadKnownPeers() ([]peer.AddrInfo, error) {
+    peersData, err := os.ReadFile("known_peers.json")
+    if err != nil {
+        return nil, fmt.Errorf("failed to read known peers: %w", err)
+    }
 
+    var peers []peer.AddrInfo
+    err = json.Unmarshal(peersData, &peers)
+    if err != nil {
+        return nil, fmt.Errorf("failed to unmarshal known peers: %w", err)
+    }
+
+    return peers, nil
 }
 
-func (dht *DHT) discoverLocalPeers()([]peer.AddrInfo, error){
+func (dht *DHT) discoverLocalPeers() ([]peer.AddrInfo, error) {
+ 
+    // ctx, cancel := context.WithTimeout(dht.Context, 5*time.Second)
+    // defer cancel()
 
+    // peersChan, err := dht.Host.Network().DiscoverPeers(ctx)
+    // if err != nil {
+    //     return nil, fmt.Errorf("failed to discover local peers: %w", err)
+    // }
+
+    // var peers []peer.AddrInfo
+    // for peerInfo := range peersChan {
+    //     peers = append(peers, peerInfo)
+    // }
+
+    // return peers, nil
 }
 
 func (dht *DHT) queryDNSSeeds() ([]peer.AddrInfo, error) {
-    
+    dnsSeeds := []string{
+        "/dnsaddr/bootstrap.libp2p.io",
+        "/dnsaddr/bootstrap.filecoin.io",
+    }
+
+    var peers []peer.AddrInfo
+    for _, seed := range dnsSeeds {
+        addr, err := multiaddr.NewMultiaddr(seed)
+        if err != nil {
+            dht.logger.Printf("Invalid DNS seed address %s: %v", seed, err)
+            continue
+        }
+
+        peerInfo, err := peer.AddrInfoFromP2pAddr(addr)
+        if err != nil {
+            dht.logger.Printf("Failed to get peer info from DNS seed %s: %v", seed, err)
+            continue
+        }
+
+        peers = append(peers, *peerInfo)
+    }
+
+    return peers, nil
 }
 
 func (dht *DHT) saveKnownPeers(peers []peer.AddrInfo) error {
-    
-}
+    peersData, err := json.Marshal(peers)
+    if err != nil {
+        return fmt.Errorf("failed to marshal known peers: %w", err)
+    }
 
+    err = os.WriteFile("known_peers.json", peersData, 0644)
+    if err != nil {
+        return fmt.Errorf("failed to save known peers: %w", err)
+    }
+
+    return nil
+}
