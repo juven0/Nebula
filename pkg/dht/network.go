@@ -9,6 +9,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -63,23 +64,29 @@ func (dht *DHT) loadKnownPeers() ([]peer.AddrInfo, error) {
 
     return peers, nil
 }
+type discoveryNotifee struct {
+	PeerChan chan peer.AddrInfo
+}
+
+func (n *discoveryNotifee) HandlePeerFound(pi peer.AddrInfo) {
+	n.PeerChan <- pi
+}
 
 func (dht *DHT) discoverLocalPeers() ([]peer.AddrInfo, error) {
- 
-    // ctx, cancel := context.WithTimeout(dht.Context, 5*time.Second)
-    // defer cancel()
+    n := &discoveryNotifee{}
+	n.PeerChan = make(chan peer.AddrInfo)
 
-    // peersChan, err := dht.Host.Network().DiscoverPeers(ctx)
-    // if err != nil {
-    //     return nil, fmt.Errorf("failed to discover local peers: %w", err)
-    // }
+    service := mdns.NewMdnsService(dht.Host, "discover_service", n)
+    if err := service.Start(); err != nil {
+		panic(err)
+	}
 
-    // var peers []peer.AddrInfo
-    // for peerInfo := range peersChan {
-    //     peers = append(peers, peerInfo)
-    // }
+    var peers []peer.AddrInfo
+    for peerInfo := range n.PeerChan {
+        peers = append(peers, peerInfo)
+    }
 
-    // return peers, nil
+    return peers, nil
 }
 
 func (dht *DHT) queryDNSSeeds() ([]peer.AddrInfo, error) {
