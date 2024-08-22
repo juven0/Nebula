@@ -1,30 +1,14 @@
 package maindht
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 
-	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 	"github.com/multiformats/go-multiaddr"
 )
-
-type mdnsNotifee struct {
-    h host.Host
-}
-
-func (n *mdnsNotifee) HandlePeerFound(pi peer.AddrInfo) {
-    if err := n.h.Connect(context.Background(), pi); err != nil {
-        log.Printf("Error connecting to peer: %s", err)
-    } else {
-        log.Printf("Connected to peer: %s", pi.ID)
-    }
-	
-}
 
 
 func (dht *DHT) JoinNetwork() error {
