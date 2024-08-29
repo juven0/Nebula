@@ -81,13 +81,11 @@ func (dht *DHT) SyncBlockchain() error {
 		localLength := len(dht.Blockchain.Blocks)
 
 		if remoteLength > localLength {
-			// Demander les blocs manquants
 			newBlocks, err := dht.getRemoteBlocks(node, localLength, remoteLength)
 			if err != nil {
 				continue
 			}
 
-			// Vérifier et ajouter les nouveaux blocs
 			err = dht.verifyAndAddBlocks(newBlocks)
 			if err != nil {
 				continue
