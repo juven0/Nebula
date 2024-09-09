@@ -2,7 +2,8 @@ package main
 
 import (
 	//"nebula/pkg/p2p"
-	maindht "nebula/pkg/DHT"
+	maindht "nebula/pkg/dht"
+
 	"nebula/pkg/p2p"
 	"time"
 )
