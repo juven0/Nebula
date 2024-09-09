@@ -6,7 +6,7 @@
 
 2. **Distribution des Blocs**
    - [ x ] Mettre en place un réseau peer-to-peer (P2P) pour distribuer les blocs.
-   - [ ] Implémenter une table de hachage distribuée (DHT) pour localiser les blocs.
+   - [ x ] Implémenter une table de hachage distribuée (DHT) pour localiser les blocs.
 
 3. **Récupération et Réassemblage des Fichiers**
    - [ ] Développer un mécanisme de recherche pour localiser les blocs de fichiers à l'aide des identifiants de hachage.
@@ -86,3 +86,7 @@ J'ai examiné le code que vous avez partagé pour votre projet de table de hacha
     - Implémentez un mécanisme pour mettre à jour le logiciel sur les nœuds de manière coordonnée.
 
 Ces étapes vous permettront d'avoir une DHT robuste et prête à être déployée. N'hésitez pas si vous avez des questions sur l'une de ces étapes ou si vous souhaitez approfondir un aspect particulier !
+
+a faire demain .. 
+- connection automatique au reseaux p2p 
+- test des foctionnaliter  
