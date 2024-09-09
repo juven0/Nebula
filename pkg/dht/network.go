@@ -1,9 +1,12 @@
 package maindht
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
@@ -13,6 +16,9 @@ import (
 
 func (dht *DHT) JoinNetwork() error {
 
+    ctx, cancel := context.WithTimeout(context.Background(), 1 * time.Minute)
+    defer cancel()
+
 	knowPeers, err := dht.loadKnownPeers()
 	if err != nil {
 		return err
@@ -21,7 +27,7 @@ func (dht *DHT) JoinNetwork() error {
 		return dht.Bootstrap(knowPeers)
 	}
 
-	localPeers, err := dht.discoverLocalPeers()
+	localPeers, err := dht.discoverLocalPeers(ctx)
 	if err == nil && len(localPeers) > 0 {
         return dht.Bootstrap(localPeers)
     }
@@ -56,21 +62,34 @@ func (n *discoveryNotifee) HandlePeerFound(pi peer.AddrInfo) {
 	n.PeerChan <- pi
 }
 
-func (dht *DHT) discoverLocalPeers() ([]peer.AddrInfo, error) {
-    n := &discoveryNotifee{}
-	n.PeerChan = make(chan peer.AddrInfo)
 
-    service := mdns.NewMdnsService(dht.Host, "discover_service", n)
-    if err := service.Start(); err != nil {
-		panic(err)
-	}
-
-    var peers []peer.AddrInfo
-    for peerInfo := range n.PeerChan {
-        peers = append(peers, peerInfo)
+func (dht *DHT) discoverLocalPeers(ctx context.Context) ([]peer.AddrInfo, error) {
+    notifee := &discoveryNotifee{
+        PeerChan: make(chan peer.AddrInfo),
     }
 
-    return peers, nil
+    service := mdns.NewMdnsService(dht.Host, "your-service-name", notifee)
+    if err := service.Start(); err != nil {
+        return nil, fmt.Errorf("failed to start mDNS service: %w", err)
+    }
+    defer service.Close()
+
+    var peers []peer.AddrInfo
+    var mu sync.Mutex
+    discoveryTimeout := time.After(30 * time.Second)
+
+    for {
+        select {
+        case peerInfo := <-notifee.PeerChan:
+            mu.Lock()
+            peers = append(peers, peerInfo)
+            mu.Unlock()
+        case <-discoveryTimeout:
+            return peers, nil
+        case <-ctx.Done():
+            return peers, ctx.Err()
+        }
+    }
 }
 
 func (dht *DHT) queryDNSSeeds() ([]peer.AddrInfo, error) {
