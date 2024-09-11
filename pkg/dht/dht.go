@@ -392,7 +392,7 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 		wg.Add(1)
 		go func(peer peer.AddrInfo) {
 			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 30)
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
 			err := dht.Host.Connect(ctx, peer)
