@@ -71,8 +71,9 @@ func (b *Block) calculateHash() []byte {
 
 func (dht *DHT) SyncBlockchain() error {
 	closestNodes := dht.FindClosestNodes(dht.RoutingTable.Self.NodeID.String(), BucketSize)
-
+	fmt.Println(closestNodes)
 	for _, node := range closestNodes {
+		fmt.Println(node)
 		remoteLength, err := dht.getRemoteBlockchainLength(node)
 		if err != nil {
 			continue
@@ -92,6 +93,10 @@ func (dht *DHT) SyncBlockchain() error {
 			}
 
 			log.Printf("Synchronized blockchain with node %s", node.NodeID)
+			return nil
+		}
+		if remoteLength == localLength {
+			log.Printf("same blockchain with node %s", node.NodeID)
 			return nil
 		}
 	}
