@@ -39,6 +39,7 @@ const (
 	BLOCKCHAIN_BLOCKS_REQUEST
 	BLOCKCHAIN_LENGTH_REQUEST
 	BLOCKCHAIN_LENGTH_RESPONSE
+	CONNECTION_SUCCESSFUL
 )
 
 type Node struct {
@@ -188,6 +189,10 @@ func (dht *DHT) HandelIncommingMessages() {
 			blocks := dht.Blockchain.Blocks[start:end]
 			blocksData, _ := json.Marshal(blocks)
 			response = Message{Type: BLOCKCHAIN_BLOCKS_RESPONSE, Value: blocksData}
+		case CONNECTION_SUCCESSFUL:
+			log.Printf("Received connection message from peer %s: %s", stream.Conn().RemotePeer().String(), string(msg.Value))
+			return
+
 		}
 
 		if err := json.NewEncoder(stream).Encode(response); err != nil {
@@ -392,7 +397,7 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 		wg.Add(1)
 		go func(peer peer.AddrInfo) {
 			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 30)
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
 			err := dht.Host.Connect(ctx, peer)
@@ -404,6 +409,10 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 			mu.Lock()
 			successfulConnections++
 			mu.Unlock()
+
+			if err := dht.sendConnectionMessage(peer.ID); err != nil {
+				log.Printf("Failed to send connection message to peer %s: %v", peer.ID, err)
+			}
 
 			dht.RoutingTable.AddNodeRoutingTable(dht.Host, NewNode(peer.ID, peer.Addrs[0].String(), 0))
 
@@ -437,6 +446,25 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 	// 	dht.FindNode(dht.RoutingTable.Self.NodeID.String())
 	// }
 	// return nil
+}
+
+func (dht *DHT) sendConnectionMessage(peerID peer.ID) error {
+	stream, err := dht.Host.NewStream(context.Background(), peerID, "/dht/1.0.0")
+	if err != nil {
+		return fmt.Errorf("failed to open stream: %w", err)
+	}
+	defer stream.Close()
+
+	message := Message{
+		Type:  CONNECTION_SUCCESSFUL,
+		Value: []byte(fmt.Sprintf("Hello from %s", dht.Host.ID().String())),
+	}
+
+	if err := json.NewEncoder(stream).Encode(message); err != nil {
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+
+	return nil
 }
 
 func (dht *DHT) StoreData(key string, value []byte) error {

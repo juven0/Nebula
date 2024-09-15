@@ -79,6 +79,8 @@ func (dht *DHT) SyncBlockchain() error {
 		}
 
 		localLength := len(dht.Blockchain.Blocks)
+		fmt.Println(dht.Blockchain.Blocks)
+		fmt.Println(closestNodes)
 
 		if remoteLength > localLength {
 			newBlocks, err := dht.getRemoteBlocks(node, localLength, remoteLength)
@@ -92,6 +94,10 @@ func (dht *DHT) SyncBlockchain() error {
 			}
 
 			log.Printf("Synchronized blockchain with node %s", node.NodeID)
+			return nil
+		}
+		if remoteLength == localLength {
+			log.Printf(" blockchain is the same with  %s", node.NodeID)
 			return nil
 		}
 	}
@@ -216,7 +222,7 @@ func (dht *DHT) Stop() error {
 }
 
 func (dht *DHT) periodicSync() {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {
