@@ -453,6 +453,8 @@ func (dht *DHT) checkProtocolSupport(peerID peer.ID) bool {
 	if err != nil {
 		log.Printf("Error checking protocol support for peer %s: %v", peerID, err)
 		return false
+	} else {
+		log.Printf("suported protocol")
 	}
 	return len(supported) > 0
 }
