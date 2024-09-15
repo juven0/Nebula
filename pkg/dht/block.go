@@ -98,11 +98,7 @@ func (dht *DHT) SyncBlockchain() error {
 			return nil
 		}
 		if remoteLength == localLength {
-<<<<<<< HEAD
-			log.Printf(" blockchain is the same with  %s", node.NodeID)
-=======
 			log.Printf("same blockchain with node %s", node.NodeID)
->>>>>>> fe5b7eaf1823f763233ecf41b8d3a36a006577c9
 			return nil
 		}
 	}

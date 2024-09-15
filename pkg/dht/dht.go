@@ -405,7 +405,7 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 				log.Printf("Failed to connect to bootstrap peer %s: %v", peer.ID, err)
 				return
 			}
-
+			dht.checkProtocolSupport(peer.ID)
 			mu.Lock()
 			successfulConnections++
 			mu.Unlock()
@@ -446,6 +446,15 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 	// 	dht.FindNode(dht.RoutingTable.Self.NodeID.String())
 	// }
 	// return nil
+}
+
+func (dht *DHT) checkProtocolSupport(peerID peer.ID) bool {
+	supported, err := dht.Host.Peerstore().SupportsProtocols(peerID, "/dht/1.0.0")
+	if err != nil {
+		log.Printf("Error checking protocol support for peer %s: %v", peerID, err)
+		return false
+	}
+	return len(supported) > 0
 }
 
 func (dht *DHT) sendConnectionMessage(peerID peer.ID) error {
