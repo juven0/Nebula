@@ -118,6 +118,20 @@ func NewNode(peerID peer.ID, addr string, port int) Node {
 	}
 }
 
+func (dht *DHT) handleStream(s network.Stream) {
+	defer s.Close()
+
+	// Créer un multiplexeur multistream
+	mux := multistream.NewMultistreamMuxer[string]()
+	mux.AddHandler(messageProtocol, dht.handleMessage)
+
+	// Utiliser le multiplexeur pour gérer la négociation de protocole
+	err := mux.Handle(s)
+	if err != nil {
+		dht.logger.Printf("Failed to handle stream: %v", err)
+	}
+}
+
 func NewDHT(cfg DHTConfig, h host.Host) *DHT {
 	// Créer un Node à partir de l'host
 	selfNode := NewNode(h.ID(), h.Addrs()[0].String(), 0) // Nous utilisons 0 comme port par défaut ici
@@ -135,9 +149,7 @@ func NewDHT(cfg DHTConfig, h host.Host) *DHT {
 	mux.AddHandler(messageProtocol, dht.handleMessage)
 
 	// Définir le gestionnaire de flux pour l'hôte
-	h.SetStreamHandler("/", func(s network.Stream) {
-		mux.Handle(s)
-	})
+	h.SetStreamHandler("/", dht.handleStream)
 	return dht
 }
 
@@ -213,15 +225,12 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 	}
 	defer s.Close()
 
-	mstream := multistream.NewMSSelect(s, messageProtocol)
-	defer mstream.Close()
-
-	if err = json.NewEncoder(mstream).Encode(message); err != nil {
+	if err = json.NewEncoder(s).Encode(message); err != nil {
 		return Message{}, fmt.Errorf("failed to encode message: %w", err)
 	}
 
 	var response Message
-	if err = json.NewDecoder(mstream).Decode(&response); err != nil {
+	if err = json.NewDecoder(s).Decode(&response); err != nil {
 		return Message{}, fmt.Errorf("failed to decode response: %w", err)
 	}
 
