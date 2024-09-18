@@ -409,7 +409,12 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 				log.Printf("Failed to connect to bootstrap peer %s: %v", peer.ID, err)
 				return
 			}
-			dht.checkProtocolSupport(peer.ID)
+			sup := dht.checkProtocolSupport(peer.ID)
+			if !sup {
+				log.Printf("Peer  does not support protocol %s", proto)
+				return
+			}
+			//dht.checkProtocolSupport(peer.ID)
 			mu.Lock()
 			successfulConnections++
 			mu.Unlock()
@@ -457,8 +462,6 @@ func (dht *DHT) checkProtocolSupport(peerID peer.ID) bool {
 	if err != nil {
 		log.Printf("Error checking protocol support for peer %s: %v", peerID, err)
 		return false
-	} else {
-		log.Printf("suported protocol")
 	}
 	return len(supported) > 0
 }
