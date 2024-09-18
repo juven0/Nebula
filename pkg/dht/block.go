@@ -198,7 +198,7 @@ func (dht *DHT) Start(bootstrapPeers []peer.AddrInfo) error {
 		return fmt.Errorf("failed to initialize routing table: %w", err)
 	}
 
-	dht.HandelIncommingMessages()
+	// dht.HandelIncommingMessages()
 	dht.periodicSync()
 	dht.periodicRefresh()
 	// dht.periodicMaintenance()

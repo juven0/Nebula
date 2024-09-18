@@ -39,6 +39,7 @@ func (p2pn *P2pNetwork) Init() error {
 	if err != nil {
 		return fmt.Errorf("failed to create libp2p host: %w", err)
 	}
+
 	p2pn.Host = h
 	return nil
 }

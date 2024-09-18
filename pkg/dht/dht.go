@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
 	"math/rand"
@@ -16,18 +17,22 @@ import (
 	//"strings"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
 	ping "github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/multiformats/go-multiaddr"
+	"github.com/multiformats/go-multistream"
 )
 
 type messageType int
 
-const proto = protocol.ID("/ipfs/ping/1.0.0")
-
+// const proto = protocol.ID("/ipfs/ping/1.0.0")
+const (
+	pingProtocol    = "/ping/1.0.0"
+	messageProtocol = "/message/1.0.0"
+)
 const (
 	IdLength   = 256 / 8
 	BucketSize = 10
@@ -115,7 +120,7 @@ func NewDHT(cfg DHTConfig, h host.Host) *DHT {
 	// Créer un Node à partir de l'host
 	selfNode := NewNode(h.ID(), h.Addrs()[0].String(), 0) // Nous utilisons 0 comme port par défaut ici
 
-	return &DHT{
+	dht := &DHT{
 		DataStore:    make(map[string][]byte),
 		RoutingTable: NewRoutingTable(selfNode, cfg.BucketSize),
 		Host:         h,
@@ -123,6 +128,69 @@ func NewDHT(cfg DHTConfig, h host.Host) *DHT {
 		stopCh:       make(chan struct{}),
 		logger:       log.New(os.Stdout, "DHT: ", log.Ldate|log.Ltime|log.Lshortfile),
 	}
+
+	mux := multistream.NewMultistreamMuxer[string]()
+	mux.AddHandler(messageProtocol, dht.handleMessage)
+
+	// Définir le gestionnaire de flux pour l'hôte
+	h.SetStreamHandler("/", func(s network.Stream) {
+		mux.Handle(s)
+	})
+	return dht
+}
+
+func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
+	defer rwc.Close()
+
+	var msg Message
+	if err := json.NewDecoder(rwc).Decode(&msg); err != nil {
+		dht.logger.Printf("Error decoding message: %v", err)
+		return err
+	}
+
+	// Afficher le message reçu
+	dht.logger.Printf("Received message from peer. Type: %v, Key: %s, Value: %s", msg.Type, msg.Key, string(msg.Value))
+
+	response := dht.processMessage(msg)
+
+	if err := json.NewEncoder(rwc).Encode(response); err != nil {
+		dht.logger.Printf("Error encoding response: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func (dht *DHT) processMessage(msg Message) Message {
+	var response Message
+
+	switch msg.Type {
+	case CONNECTION_SUCCESSFUL:
+		dht.logger.Printf("Connection successful message received: %s", string(msg.Value))
+		response = Message{Type: CONNECTION_SUCCESSFUL, Value: []byte("Connection acknowledged")}
+	case STORE:
+		dht.StoreData(msg.Key, msg.Value)
+		response = Message{Type: STORE, Key: msg.Key}
+	case FIND_VALUE:
+		value, found := dht.Retrieve(msg.Key)
+		if found {
+			response = Message{Type: FIND_VALUE, Key: msg.Key, Value: value}
+		} else {
+			closestNodes := dht.FindClosestNodes(msg.Key, BucketSize)
+			response = Message{Type: FIND_NODE, Key: msg.Key, Value: encodePeers(closestNodes)}
+		}
+	case FIND_NODE:
+		closestNodes := dht.FindClosestNodes(msg.Key, BucketSize)
+		response = Message{Type: FIND_NODE, Key: msg.Key, Value: encodePeers(closestNodes)}
+	case DELETE_FILE:
+		delete(dht.DataStore, msg.Key)
+		response = Message{Type: DELETE_FILE, Key: msg.Key}
+	default:
+		dht.logger.Printf("Unknown message type received: %v", msg.Type)
+		response = Message{Type: messageType(-1), Value: []byte("Unknown message type")}
+	}
+
+	return response
 }
 
 // func NewDHT(h host.Host) *DHT {
@@ -136,26 +204,30 @@ func NewDHT(cfg DHTConfig, h host.Host) *DHT {
 // }
 
 func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
-	stream, err := dht.Host.NewStream(context.Background(), to, proto)
+	ctx := context.Background()
+	s, err := dht.Host.NewStream(ctx, to, protocol.ID(messageProtocol))
 	if err != nil {
-		return Message{}, err
+		return Message{}, fmt.Errorf("failed to open stream: %w", err)
 	}
+	defer s.Close()
 
-	defer stream.Close()
+	mstream := multistream.NewMSSelect(s, messageProtocol)
+	defer mstream.Close()
 
-	if err = json.NewEncoder(stream).Encode(message); err != nil {
-		return Message{}, fmt.Errorf("could not encode message: %v", err)
+	if err = json.NewEncoder(mstream).Encode(message); err != nil {
+		return Message{}, fmt.Errorf("failed to encode message: %w", err)
 	}
 
 	var response Message
-	if err := json.NewDecoder(stream).Decode(&response); err != nil {
-		return Message{}, fmt.Errorf("could not decode message: %v", err)
+	if err = json.NewDecoder(mstream).Decode(&response); err != nil {
+		return Message{}, fmt.Errorf("failed to decode response: %w", err)
 	}
+
 	return response, nil
 }
 
 func (dht *DHT) HandelIncommingMessages() {
-	dht.Host.SetStreamHandler(proto, func(stream network.Stream) {
+	dht.Host.SetStreamHandler(messageProtocol, func(stream network.Stream) {
 		defer stream.Close()
 
 		var msg Message
@@ -411,7 +483,7 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 			}
 			sup := dht.checkProtocolSupport(peer.ID)
 			if !sup {
-				log.Printf("Peer  does not support protocol %s", proto)
+				log.Printf("Peer  does not support protocol %s", messageProtocol)
 				return
 			}
 			//dht.checkProtocolSupport(peer.ID)
@@ -420,7 +492,7 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 			mu.Unlock()
 
 			if err := dht.sendConnectionMessage(peer.ID); err != nil {
-				log.Printf("Failed to send connection message to peer %s: %v", peer.ID, err)
+				dht.logger.Printf("Failed to send connection message to peer %s: %v", peer.ID, err)
 			}
 
 			dht.RoutingTable.AddNodeRoutingTable(dht.Host, NewNode(peer.ID, peer.Addrs[0].String(), 0))
@@ -458,7 +530,7 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 }
 
 func (dht *DHT) checkProtocolSupport(peerID peer.ID) bool {
-	supported, err := dht.Host.Peerstore().SupportsProtocols(peerID, proto)
+	supported, err := dht.Host.Peerstore().SupportsProtocols(peerID, messageProtocol)
 	if err != nil {
 		log.Printf("Error checking protocol support for peer %s: %v", peerID, err)
 		return false
@@ -467,22 +539,12 @@ func (dht *DHT) checkProtocolSupport(peerID peer.ID) bool {
 }
 
 func (dht *DHT) sendConnectionMessage(peerID peer.ID) error {
-	stream, err := dht.Host.NewStream(context.Background(), peerID, proto)
-	if err != nil {
-		return fmt.Errorf("failed to open stream: %w", err)
-	}
-	defer stream.Close()
-
 	message := Message{
 		Type:  CONNECTION_SUCCESSFUL,
 		Value: []byte(fmt.Sprintf("Hello from %s", dht.Host.ID().String())),
 	}
-
-	if err := json.NewEncoder(stream).Encode(message); err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
-	}
-
-	return nil
+	_, err := dht.SendMessage(peerID, message)
+	return err
 }
 
 func (dht *DHT) StoreData(key string, value []byte) error {
