@@ -26,7 +26,7 @@ import (
 
 type messageType int
 
-var proto = protocol.ID("/your/protocol/1.0.0")
+const proto = protocol.ID("/ipfs/ping/1.0.0")
 
 const (
 	IdLength   = 256 / 8
