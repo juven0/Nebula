@@ -21,7 +21,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	ping "github.com/libp2p/go-libp2p/p2p/protocol/ping"
+	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
+
+	// ping "github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multistream"
 )
@@ -481,10 +483,14 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 				log.Printf("Failed to connect to bootstrap peer %s: %v", peer.ID, err)
 				return
 			}
-			sup := dht.checkProtocolSupport(peer.ID)
-			if !sup {
-				log.Printf("Peer  does not support protocol %s", messageProtocol)
-				return
+
+			if !dht.checkProtocolSupport(peer.ID) {
+				dht.logger.Printf("Peer %s does not support protocol %s. Trying fallback.", peer.ID, messageProtocol)
+				// Essayez un protocole de repli ou une autre méthode de communication
+				if err := dht.tryFallbackProtocol(peer.ID); err != nil {
+					dht.logger.Printf("Fallback failed for peer %s: %v", peer.ID, err)
+					return
+				}
 			}
 			//dht.checkProtocolSupport(peer.ID)
 			mu.Lock()
@@ -516,17 +522,20 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 
 	log.Printf("Successfully bootstrapped with %d peers", successfulConnections)
 	return nil
+}
 
-	// for _, peerInfo := range bootstrapPeer {
-	// 	err := dht.Host.Connect(context.Background(), peerInfo)
-	// 	if err != nil {
-	// 		log.Printf("Failed to connect to bootstrap peer %s: %v", peerInfo.ID, err)
-	// 		continue
-	// 	}
-	// 	dht.RoutingTable.AddNodeRoutingTable(dht.Host, NewNode(peerInfo.ID, peerInfo.Addrs[0].String(), 0))
-	// 	dht.FindNode(dht.RoutingTable.Self.NodeID.String())
-	// }
-	// return nil
+func (dht *DHT) tryFallbackProtocol(peerID peer.ID) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Utilisez directement la fonction Ping du package
+	result := <-ping.Ping(ctx, dht.Host, peerID)
+	if result.Error != nil {
+		return fmt.Errorf("ping failed: %w", result.Error)
+	}
+
+	dht.logger.Printf("Successful ping to %s (RTT: %s)", peerID, result.RTT)
+	return nil
 }
 
 func (dht *DHT) checkProtocolSupport(peerID peer.ID) bool {
