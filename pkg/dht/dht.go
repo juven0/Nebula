@@ -257,7 +257,7 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 		return Message{}, fmt.Errorf("failed to encode message: %w", err)
 	}
 
-	// Ajouter un retour à la ligne après le message
+	// Ajouter un retour à la ligne après le message JSON
 	if _, err := s.Write([]byte("\n")); err != nil {
 		return Message{}, fmt.Errorf("failed to write newline: %w", err)
 	}
