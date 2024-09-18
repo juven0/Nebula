@@ -593,7 +593,7 @@ func (dht *DHT) checkProtocolSupport(peerID peer.ID) bool {
 func (dht *DHT) sendConnectionMessage(peerID peer.ID) error {
 	message := Message{
 		Type:  CONNECTION_SUCCESSFUL,
-		Value: []byte(fmt.Sprintf("Hello from %s", dht.Host.ID().String())),
+		Value: []byte("helooooooooooooooooooo\n"),
 	}
 	_, err := dht.SendMessage(peerID, message)
 	return err
