@@ -26,7 +26,7 @@ func (dht *DHT) JoinNetwork() error {
 	// if len(knowPeers) > 0 {
 	// 	return dht.Bootstrap(knowPeers)
 	// }
-
+	log.Println(dht.Host.ID())
 	localPeers, err := dht.discoverLocalPeers(ctx)
 	if err == nil && len(localPeers) > 0 {
 		return dht.Bootstrap(localPeers)

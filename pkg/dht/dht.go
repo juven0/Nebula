@@ -19,11 +19,14 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
 	ping "github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/multiformats/go-multiaddr"
 )
 
 type messageType int
+
+var proto = protocol.ID("/your/protocol/1.0.0")
 
 const (
 	IdLength   = 256 / 8
@@ -100,6 +103,7 @@ type File struct {
 }
 
 func NewNode(peerID peer.ID, addr string, port int) Node {
+
 	return Node{
 		NodeID: peerID,
 		Addr:   addr,
@@ -132,7 +136,7 @@ func NewDHT(cfg DHTConfig, h host.Host) *DHT {
 // }
 
 func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
-	stream, err := dht.Host.NewStream(context.Background(), to, "/dht/1.0.0")
+	stream, err := dht.Host.NewStream(context.Background(), to, proto)
 	if err != nil {
 		return Message{}, err
 	}
@@ -151,7 +155,7 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 }
 
 func (dht *DHT) HandelIncommingMessages() {
-	dht.Host.SetStreamHandler("/dht/1.0.0", func(stream network.Stream) {
+	dht.Host.SetStreamHandler(proto, func(stream network.Stream) {
 		defer stream.Close()
 
 		var msg Message
@@ -449,7 +453,7 @@ func (dht *DHT) Bootstrap(bootstrapPeer []peer.AddrInfo) error {
 }
 
 func (dht *DHT) checkProtocolSupport(peerID peer.ID) bool {
-	supported, err := dht.Host.Peerstore().SupportsProtocols(peerID, "/dht/1.0.0")
+	supported, err := dht.Host.Peerstore().SupportsProtocols(peerID, proto)
 	if err != nil {
 		log.Printf("Error checking protocol support for peer %s: %v", peerID, err)
 		return false
@@ -460,7 +464,7 @@ func (dht *DHT) checkProtocolSupport(peerID peer.ID) bool {
 }
 
 func (dht *DHT) sendConnectionMessage(peerID peer.ID) error {
-	stream, err := dht.Host.NewStream(context.Background(), peerID, "/dht/1.0.0")
+	stream, err := dht.Host.NewStream(context.Background(), peerID, proto)
 	if err != nil {
 		return fmt.Errorf("failed to open stream: %w", err)
 	}
