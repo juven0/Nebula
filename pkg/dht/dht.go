@@ -1,6 +1,7 @@
 package maindht
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -166,21 +167,34 @@ func NewDHT(cfg DHTConfig, h host.Host) *DHT {
 func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
 	defer rwc.Close()
 
-	decoder := json.NewDecoder(rwc)
-	var msg Message
-	if err := decoder.Decode(&msg); err != nil {
-		dht.logger.Printf("Error decoding message: %v", err)
-		return err
+	scanner := bufio.NewScanner(rwc)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+
+		var msg Message
+		if err := json.Unmarshal(line, &msg); err != nil {
+			dht.logger.Printf("Error decoding message: %v, raw message: %s", err, string(line))
+			return err
+		}
+
+		dht.logger.Printf("Received message from peer. Type: %v, Key: %s, Value: %s", msg.Type, msg.Key, string(msg.Value))
+
+		response := dht.processMessage(msg)
+
+		responseJSON, err := json.Marshal(response)
+		if err != nil {
+			dht.logger.Printf("Error encoding response: %v", err)
+			return err
+		}
+
+		if _, err := rwc.Write(append(responseJSON, '\n')); err != nil {
+			dht.logger.Printf("Error writing response: %v", err)
+			return err
+		}
 	}
 
-	// Afficher le message reçu
-	dht.logger.Printf("Received message from peer. Type: %v, Key: %s, Value: %s", msg.Type, msg.Key, string(msg.Value))
-
-	response := dht.processMessage(msg)
-
-	encoder := json.NewEncoder(rwc)
-	if err := encoder.Encode(response); err != nil {
-		dht.logger.Printf("Error encoding response: %v", err)
+	if err := scanner.Err(); err != nil {
+		dht.logger.Printf("Error reading from stream: %v", err)
 		return err
 	}
 
@@ -237,15 +251,12 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 	}
 	defer s.Close()
 
-	// Utilisez un encoder JSON avec NewlineEncoder
-	encoder := json.NewEncoder(s)
-	if err = encoder.Encode(message); err != nil {
+	if err = json.NewEncoder(s).Encode(message); err != nil {
 		return Message{}, fmt.Errorf("failed to encode message: %w", err)
 	}
 
 	var response Message
-	decoder := json.NewDecoder(s)
-	if err = decoder.Decode(&response); err != nil {
+	if err = json.NewDecoder(s).Decode(&response); err != nil {
 		return Message{}, fmt.Errorf("failed to decode response: %w", err)
 	}
 
