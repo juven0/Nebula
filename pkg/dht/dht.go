@@ -149,7 +149,7 @@ func NewDHT(cfg DHTConfig, h host.Host) *DHT {
 	mux.AddHandler(messageProtocol, dht.handleMessage)
 
 	// Définir le gestionnaire de flux pour l'hôte
-	h.SetStreamHandler("/", dht.handleStream)
+	h.SetStreamHandler(protocol.ID(messageProtocol), dht.handleStream)
 	return dht
 }
 
