@@ -200,7 +200,6 @@ func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
 
 	return nil
 }
-
 func (dht *DHT) processMessage(msg Message) Message {
 	var response Message
 
@@ -250,16 +249,23 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 		return Message{}, fmt.Errorf("failed to open stream: %w", err)
 	}
 	defer s.Close()
-
-	if err = json.NewEncoder(s).Encode(message); err != nil {
+	dht.logger.Printf("Sending raw message: %+v", message)
+	encoder := json.NewEncoder(s)
+	if err = encoder.Encode(message); err != nil {
 		return Message{}, fmt.Errorf("failed to encode message: %w", err)
 	}
 
-	var response Message
-	if err = json.NewDecoder(s).Decode(&response); err != nil {
-		return Message{}, fmt.Errorf("failed to decode response: %w", err)
+	// Ajouter un retour à la ligne après le message
+	if _, err := s.Write([]byte("\n")); err != nil {
+		return Message{}, fmt.Errorf("failed to write newline: %w", err)
 	}
 
+	var response Message
+	decoder := json.NewDecoder(s)
+	if err = decoder.Decode(&response); err != nil {
+		return Message{}, fmt.Errorf("failed to decode response: %w", err)
+	}
+	dht.logger.Printf("Received raw response: %+v", response)
 	return response, nil
 }
 
