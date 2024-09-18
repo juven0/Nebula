@@ -42,6 +42,8 @@ const (
 	BucketSize = 10
 )
 
+const messageDelimiter = byte('\x00')
+
 const (
 	STORE messageType = iota
 	FIND_VALUE
@@ -249,7 +251,7 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 		return Message{}, fmt.Errorf("failed to open stream: %w", err)
 	}
 	defer s.Close()
-	dht.logger.Printf("Sending raw message: %+v", message)
+
 	encoder := json.NewEncoder(s)
 	if err = encoder.Encode(message); err != nil {
 		return Message{}, fmt.Errorf("failed to encode message: %w", err)
@@ -265,7 +267,7 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 	if err = decoder.Decode(&response); err != nil {
 		return Message{}, fmt.Errorf("failed to decode response: %w", err)
 	}
-	dht.logger.Printf("Received raw response: %+v", response)
+
 	return response, nil
 }
 
