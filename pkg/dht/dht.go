@@ -137,9 +137,13 @@ func (dht *DHT) handleStream(s network.Stream) {
 		} else if strings.Contains(err.Error(), "message did not have trailing newline") {
 			dht.logger.Printf("Received message without trailing newline, trying to handle anyway")
 			// Essayez de lire le message sans le retour à la ligne
-			buf, _ := io.ReadAll(s)
-			dht.logger.Printf("Received raw message: %s", string(buf))
-			// Vous pouvez essayer de traiter le message ici si nécessaire
+			buf := make([]byte, 1024) // Taille arbitraire
+			n, err := s.Read(buf)
+			if err != nil && err != io.EOF {
+				dht.logger.Printf("Error reading from stream: %v", err)
+			} else {
+				dht.logger.Printf("Read %d bytes: %s", n, string(buf[:n]))
+			}
 		} else {
 			dht.logger.Printf("Failed to handle stream: %v", err)
 		}
