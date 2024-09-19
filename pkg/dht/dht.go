@@ -166,12 +166,19 @@ func NewDHT(cfg DHTConfig, h host.Host) *DHT {
 	return dht
 }
 
+const maxResponseSize = 1024 * 1024 // 1 Mo
+
 func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
 	defer rwc.Close()
 
 	scanner := bufio.NewScanner(rwc)
 	for scanner.Scan() {
 		line := scanner.Bytes()
+
+		// Limiter la taille de la réponse
+		if len(line) > maxResponseSize {
+			line = line[:maxResponseSize]
+		}
 
 		var msg Message
 		if err := json.Unmarshal(line, &msg); err != nil {
@@ -309,6 +316,7 @@ func (dht *DHT) processMessage(msg Message) Message {
 // }
 
 func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
+	dht.logger.Printf("Sending raw message: %+v", message)
 	ctx := context.Background()
 	s, err := dht.Host.NewStream(ctx, to, protocol.ID(messageProtocol))
 	if err != nil {
@@ -332,6 +340,7 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 		return Message{}, fmt.Errorf("failed to decode response: %w", err)
 	}
 
+	dht.logger.Printf("Received raw response: %+v", response)
 	return response, nil
 }
 
