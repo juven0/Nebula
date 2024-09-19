@@ -137,13 +137,9 @@ func (dht *DHT) handleStream(s network.Stream) {
 		} else if strings.Contains(err.Error(), "message did not have trailing newline") {
 			dht.logger.Printf("Received message without trailing newline, trying to handle anyway")
 			// Essayez de lire le message sans le retour à la ligne
-			buf := make([]byte, 1024) // Taille arbitraire
-			n, err := s.Read(buf)
-			if err != nil && err != io.EOF {
-				dht.logger.Printf("Error reading from stream: %v", err)
-			} else {
-				dht.logger.Printf("Read %d bytes: %s", n, string(buf[:n]))
-			}
+			buf, _ := io.ReadAll(s)
+			dht.logger.Printf("Received raw message: %s", string(buf))
+			// Vous pouvez essayer de traiter le message ici si nécessaire
 		} else {
 			dht.logger.Printf("Failed to handle stream: %v", err)
 		}
@@ -174,39 +170,13 @@ func NewDHT(cfg DHTConfig, h host.Host) *DHT {
 func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
 	defer rwc.Close()
 
-	reader := bufio.NewReader(rwc)
-
-	for {
-		dht.logger.Printf("Waiting for new message...")
-
-		// Read message length (4 bytes)
-		lengthBuf := make([]byte, 4)
-		_, err := io.ReadFull(reader, lengthBuf)
-		if err != nil {
-			if err == io.EOF {
-				dht.logger.Printf("Connection closed normally")
-				return nil
-			}
-			dht.logger.Printf("Failed to read message length: %v", err)
-			return fmt.Errorf("failed to read message length: %w", err)
-		}
-
-		messageLength := binary.BigEndian.Uint32(lengthBuf)
-		dht.logger.Printf("Received message length: %d bytes", messageLength)
-
-		// Read the message
-		messageBuf := make([]byte, messageLength)
-		_, err = io.ReadFull(reader, messageBuf)
-		if err != nil {
-			dht.logger.Printf("Failed to read message: %v", err)
-			return fmt.Errorf("failed to read message: %w", err)
-		}
-
-		dht.logger.Printf("Raw message received: %x", messageBuf)
+	scanner := bufio.NewScanner(rwc)
+	for scanner.Scan() {
+		line := scanner.Bytes()
 
 		var msg Message
-		if err := json.Unmarshal(messageBuf, &msg); err != nil {
-			dht.logger.Printf("Error decoding message: %v, raw message: %x", err, messageBuf)
+		if err := json.Unmarshal(line, &msg); err != nil {
+			dht.logger.Printf("Error decoding message: %v, raw message: %s", err, string(line))
 			return err
 		}
 
@@ -214,30 +184,24 @@ func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
 
 		response := dht.processMessage(msg)
 
-		// Encode response
-		responseBytes, err := json.Marshal(response)
+		responseJSON, err := json.Marshal(response)
 		if err != nil {
 			dht.logger.Printf("Error encoding response: %v", err)
 			return err
 		}
 
-		dht.logger.Printf("Sending response, length: %d bytes", len(responseBytes))
-
-		// Write response length
-		binary.BigEndian.PutUint32(lengthBuf, uint32(len(responseBytes)))
-		if _, err := rwc.Write(lengthBuf); err != nil {
-			dht.logger.Printf("Failed to write response length: %v", err)
-			return fmt.Errorf("failed to write response length: %w", err)
+		if _, err := rwc.Write(append(responseJSON, '\n')); err != nil {
+			dht.logger.Printf("Error writing response: %v", err)
+			return err
 		}
-
-		// Write response
-		if _, err := rwc.Write(responseBytes); err != nil {
-			dht.logger.Printf("Failed to write response: %v", err)
-			return fmt.Errorf("failed to write response: %w", err)
-		}
-
-		dht.logger.Printf("Response sent successfully")
 	}
+
+	if err := scanner.Err(); err != nil {
+		dht.logger.Printf("Error reading from stream: %v", err)
+		return err
+	}
+
+	return nil
 }
 
 // func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
@@ -357,7 +321,22 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 	// Encode the message
 	messageBytes, err := json.Marshal(message)
 	messageBytes = append(messageBytes, '\n')
+	if err != nil {
+		dht.logger.Printf("Failed to encode message: %v", err)
+		return Message{}, fmt.Errorf("failed to encode message: %w", err)
+	}
 
+	dht.logger.Printf("Sending message to peer %s, length: %d bytes", to, len(messageBytes))
+
+	// Write message length
+	lengthBuf := make([]byte, 4)
+	binary.BigEndian.PutUint32(lengthBuf, uint32(len(messageBytes)))
+	if _, err := s.Write(lengthBuf); err != nil {
+		dht.logger.Printf("Failed to write message length: %v", err)
+		return Message{}, fmt.Errorf("failed to write message length: %w", err)
+	}
+
+	// Write message
 	if _, err := s.Write(messageBytes); err != nil {
 		dht.logger.Printf("Failed to write message: %v", err)
 		return Message{}, fmt.Errorf("failed to write message: %w", err)
@@ -365,19 +344,34 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 
 	dht.logger.Printf("Message sent successfully, waiting for response...")
 
-	// Use buffered reader to read until delimiter '\n'
-	bufReader := bufio.NewReader(s)
-	responseBuf, err := bufReader.ReadString('\n') // Lire jusqu'au retour à la ligne
+	// Read response length
+	_, err = io.ReadFull(s, lengthBuf)
+	if err != nil {
+		dht.logger.Printf("Failed to read response length: %v", err)
+		return Message{}, fmt.Errorf("failed to read response length: %w", err)
+	}
+
+	responseLength := binary.BigEndian.Uint32(lengthBuf)
+	dht.logger.Printf("Received response length: %d bytes", responseLength)
+
+	// Vérification de la longueur de la réponse
+	if responseLength > 1000000 { // Ajustez cette valeur selon vos besoins
+		dht.logger.Printf("Response length too large: %d bytes", responseLength)
+		return Message{}, fmt.Errorf("response length too large: %d bytes", responseLength)
+	}
+
+	// Read response
+	responseBuf := make([]byte, responseLength)
+	_, err = io.ReadFull(s, responseBuf)
 	if err != nil {
 		dht.logger.Printf("Failed to read response: %v", err)
 		return Message{}, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	dht.logger.Printf("Raw response received: %s", responseBuf)
+	dht.logger.Printf("Raw response received: %x", responseBuf)
 
-	// Decode the JSON response
 	var response Message
-	if err := json.Unmarshal([]byte(responseBuf), &response); err != nil {
+	if err := json.Unmarshal(responseBuf, &response); err != nil {
 		dht.logger.Printf("Failed to decode response: %v", err)
 		return Message{}, fmt.Errorf("failed to decode response: %w", err)
 	}
@@ -385,64 +379,78 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 	dht.logger.Printf("Response received and decoded successfully")
 
 	return response, nil
-	// if err != nil {
-	// 	dht.logger.Printf("Failed to encode message: %v", err)
-	// 	return Message{}, fmt.Errorf("failed to encode message: %w", err)
-	// }
-
-	// dht.logger.Printf("Sending message to peer %s, length: %d bytes", to, len(messageBytes))
-
-	// // Write message length
-	// lengthBuf := make([]byte, 4)
-	// binary.BigEndian.PutUint32(lengthBuf, uint32(len(messageBytes)))
-	// if _, err := s.Write(lengthBuf); err != nil {
-	// 	dht.logger.Printf("Failed to write message length: %v", err)
-	// 	return Message{}, fmt.Errorf("failed to write message length: %w", err)
-	// }
-
-	// // Write message
-	// if _, err := s.Write(messageBytes); err != nil {
-	// 	dht.logger.Printf("Failed to write message: %v", err)
-	// 	return Message{}, fmt.Errorf("failed to write message: %w", err)
-	// }
-
-	// dht.logger.Printf("Message sent successfully, waiting for response...")
-
-	// _, err = io.ReadFull(s, lengthBuf)
-	// if err != nil {
-	// 	dht.logger.Printf("Failed to read response length: %v", err)
-	// 	return Message{}, fmt.Errorf("failed to read response length: %w", err)
-	// }
-
-	// responseLength := binary.BigEndian.Uint32(lengthBuf)
-	// dht.logger.Printf("Received response length: %d bytes", responseLength)
-
-	// // Vérification de la longueur de la réponse
-	// if responseLength > 1000000 { // Ajustez cette valeur selon vos besoins
-	// 	dht.logger.Printf("Response length too large: %d bytes", responseLength)
-	// 	return Message{}, fmt.Errorf("response length too large: %d bytes", responseLength)
-	// }
-
-	// // Read response
-	// responseBuf := make([]byte, responseLength)
-	// _, err = io.ReadFull(s, responseBuf)
-	// if err != nil {
-	// 	dht.logger.Printf("Failed to read response: %v", err)
-	// 	return Message{}, fmt.Errorf("failed to read response: %w", err)
-	// }
-
-	// dht.logger.Printf("Raw response received: %x", responseBuf)
-
-	// var response Message
-	// if err := json.Unmarshal(responseBuf, &response); err != nil {
-	// 	dht.logger.Printf("Failed to decode response: %v", err)
-	// 	return Message{}, fmt.Errorf("failed to decode response: %w", err)
-	// }
-
-	// dht.logger.Printf("Response received and decoded successfully")
-
-	return response, nil
 }
+
+// func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
+// 	ctx := context.Background()
+// 	s, err := dht.Host.NewStream(ctx, to, protocol.ID(messageProtocol))
+// 	if err != nil {
+// 		dht.logger.Printf("Failed to open stream to peer %s: %v", to, err)
+// 		return Message{}, fmt.Errorf("failed to open stream: %w", err)
+// 	}
+// 	defer s.Close()
+
+// 	// Encode the message
+// 	messageBytes, err := json.Marshal(message)
+// 	messageBytes = append(messageBytes, '\n')
+// 	if err != nil {
+// 		dht.logger.Printf("Failed to encode message: %v", err)
+// 		return Message{}, fmt.Errorf("failed to encode message: %w", err)
+// 	}
+
+// 	dht.logger.Printf("Sending message to peer %s, length: %d bytes", to, len(messageBytes))
+
+// 	// Write message length
+// 	lengthBuf := make([]byte, 4)
+// 	binary.BigEndian.PutUint32(lengthBuf, uint32(len(messageBytes)))
+// 	if _, err := s.Write(lengthBuf); err != nil {
+// 		dht.logger.Printf("Failed to write message length: %v", err)
+// 		return Message{}, fmt.Errorf("failed to write message length: %w", err)
+// 	}
+
+// 	// Write message
+// 	if _, err := s.Write(messageBytes); err != nil {
+// 		dht.logger.Printf("Failed to write message: %v", err)
+// 		return Message{}, fmt.Errorf("failed to write message: %w", err)
+// 	}
+
+// 	dht.logger.Printf("Message sent successfully, waiting for response...")
+
+// 	_, err = io.ReadFull(s, lengthBuf)
+// 	if err != nil {
+// 		dht.logger.Printf("Failed to read response length: %v", err)
+// 		return Message{}, fmt.Errorf("failed to read response length: %w", err)
+// 	}
+
+// 	responseLength := binary.BigEndian.Uint32(lengthBuf)
+// 	dht.logger.Printf("Received response length: %d bytes", responseLength)
+
+// 	// Vérification de la longueur de la réponse
+// 	if responseLength > 1000000 { // Ajustez cette valeur selon vos besoins
+// 		dht.logger.Printf("Response length too large: %d bytes", responseLength)
+// 		return Message{}, fmt.Errorf("response length too large: %d bytes", responseLength)
+// 	}
+
+// 	// Read response
+// 	responseBuf := make([]byte, responseLength)
+// 	_, err = io.ReadFull(s, responseBuf)
+// 	if err != nil {
+// 		dht.logger.Printf("Failed to read response: %v", err)
+// 		return Message{}, fmt.Errorf("failed to read response: %w", err)
+// 	}
+
+// 	dht.logger.Printf("Raw response received: %x", responseBuf)
+
+// 	var response Message
+// 	if err := json.Unmarshal(responseBuf, &response); err != nil {
+// 		dht.logger.Printf("Failed to decode response: %v", err)
+// 		return Message{}, fmt.Errorf("failed to decode response: %w", err)
+// 	}
+
+// 	dht.logger.Printf("Response received and decoded successfully")
+
+// 	return response, nil
+// }
 
 // func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 // 	ctx := context.Background()
