@@ -175,30 +175,34 @@ func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
 	for {
 		dht.logger.Printf("Waiting for new message...")
 
-		// Read message length (4 bytes)
 		lengthBuf := make([]byte, 4)
-		_, err := io.ReadFull(reader, lengthBuf)
+		n, err := io.ReadFull(reader, lengthBuf)
 		if err != nil {
 			if err == io.EOF {
 				dht.logger.Printf("Connection closed normally")
 				return nil
 			}
-			dht.logger.Printf("Failed to read message length: %v", err)
+			dht.logger.Printf("Failed to read message length: %v (bytes read: %d)", err, n)
 			return fmt.Errorf("failed to read message length: %w", err)
 		}
 
 		messageLength := binary.BigEndian.Uint32(lengthBuf)
 		dht.logger.Printf("Received message length: %d bytes", messageLength)
 
+		if messageLength > 1000000 { // Ajustez cette valeur selon vos besoins
+			dht.logger.Printf("Message length too large: %d bytes", messageLength)
+			return fmt.Errorf("message length too large: %d bytes", messageLength)
+		}
+
 		// Read the message
 		messageBuf := make([]byte, messageLength)
-		_, err = io.ReadFull(reader, messageBuf)
+		n, err = io.ReadFull(reader, messageBuf)
 		if err != nil {
-			dht.logger.Printf("Failed to read message: %v", err)
+			dht.logger.Printf("Failed to read message: %v (bytes read: %d)", err, n)
 			return fmt.Errorf("failed to read message: %w", err)
 		}
 
-		dht.logger.Printf("Raw message received: %x", messageBuf)
+		dht.logger.Printf("Raw message received (%d bytes): %x", n, messageBuf)
 
 		var msg Message
 		if err := json.Unmarshal(messageBuf, &msg); err != nil {
@@ -206,7 +210,7 @@ func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
 			return err
 		}
 
-		dht.logger.Printf("Received message from peer. Type: %v, Key: %s, Value: %s", msg.Type, msg.Key, string(msg.Value))
+		dht.logger.Printf("Decoded message: Type: %v, Key: %s, Value: %s", msg.Type, msg.Key, string(msg.Value))
 
 		response := dht.processMessage(msg)
 
@@ -350,6 +354,9 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 	}
 	defer s.Close()
 
+	deadline := time.Now().Add(10 * time.Second)
+	s.SetDeadline(deadline)
+
 	// Encode the message
 	messageBytes, err := json.Marshal(message)
 	if err != nil {
@@ -375,7 +382,6 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 
 	dht.logger.Printf("Message sent successfully, waiting for response...")
 
-	// Read response length
 	_, err = io.ReadFull(s, lengthBuf)
 	if err != nil {
 		dht.logger.Printf("Failed to read response length: %v", err)
@@ -384,6 +390,12 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 
 	responseLength := binary.BigEndian.Uint32(lengthBuf)
 	dht.logger.Printf("Received response length: %d bytes", responseLength)
+
+	// Vérification de la longueur de la réponse
+	if responseLength > 1000000 { // Ajustez cette valeur selon vos besoins
+		dht.logger.Printf("Response length too large: %d bytes", responseLength)
+		return Message{}, fmt.Errorf("response length too large: %d bytes", responseLength)
+	}
 
 	// Read response
 	responseBuf := make([]byte, responseLength)
