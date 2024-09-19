@@ -817,8 +817,18 @@ func (dht *DHT) sendConnectionMessage(peerID peer.ID) error {
 	if err != nil {
 		return err
 	}
-	_, err = dht.SendMessage(peerID, Message{Type: CONNECTION_SUCCESSFUL, Value: jsonMessage})
+	jsonData := append(jsonMessage, messageDelimiter)
+	_, err = dht.SendMessage(peerID, Message{Type: CONNECTION_SUCCESSFUL, Value: jsonData})
 	return err
+}
+
+func formatMessage(msg Message) ([]byte, error) {
+	// Encode le message en JSON
+	jsonData, err := json.Marshal(msg)
+	if err != nil {
+		return nil, err
+	}
+	return jsonData, nil
 }
 
 func (dht *DHT) StoreData(key string, value []byte) error {
