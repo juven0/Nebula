@@ -1,7 +1,6 @@
 package maindht
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -165,17 +164,19 @@ func NewDHT(cfg DHTConfig, h host.Host) *DHT {
 	h.SetStreamHandler(protocol.ID(messageProtocol), dht.handleStream)
 	return dht
 }
-
 func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
 	defer rwc.Close()
 
-	scanner := bufio.NewScanner(rwc)
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	decoder := json.NewDecoder(rwc)
+	encoder := json.NewEncoder(rwc)
 
+	for {
 		var msg Message
-		if err := json.Unmarshal(line, &msg); err != nil {
-			dht.logger.Printf("Error decoding message: %v, raw message: %s", err, string(line))
+		if err := decoder.Decode(&msg); err != nil {
+			if err == io.EOF {
+				return nil // Connection closed normally
+			}
+			dht.logger.Printf("Error decoding message: %v", err)
 			return err
 		}
 
@@ -183,25 +184,49 @@ func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
 
 		response := dht.processMessage(msg)
 
-		responseJSON, err := json.Marshal(response)
-		if err != nil {
+		if err := encoder.Encode(response); err != nil {
 			dht.logger.Printf("Error encoding response: %v", err)
 			return err
 		}
-
-		if _, err := rwc.Write(append(responseJSON, '\n')); err != nil {
-			dht.logger.Printf("Error writing response: %v", err)
-			return err
-		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		dht.logger.Printf("Error reading from stream: %v", err)
-		return err
-	}
-
-	return nil
 }
+
+// func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
+// 	defer rwc.Close()
+
+// 	scanner := bufio.NewScanner(rwc)
+// 	for scanner.Scan() {
+// 		line := scanner.Bytes()
+
+// 		var msg Message
+// 		if err := json.Unmarshal(line, &msg); err != nil {
+// 			dht.logger.Printf("Error decoding message: %v, raw message: %s", err, string(line))
+// 			return err
+// 		}
+
+// 		dht.logger.Printf("Received message from peer. Type: %v, Key: %s, Value: %s", msg.Type, msg.Key, string(msg.Value))
+
+// 		response := dht.processMessage(msg)
+
+// 		responseJSON, err := json.Marshal(response)
+// 		if err != nil {
+// 			dht.logger.Printf("Error encoding response: %v", err)
+// 			return err
+// 		}
+
+// 		if _, err := rwc.Write(append(responseJSON, '\n')); err != nil {
+// 			dht.logger.Printf("Error writing response: %v", err)
+// 			return err
+// 		}
+// 	}
+
+// 	if err := scanner.Err(); err != nil {
+// 		dht.logger.Printf("Error reading from stream: %v", err)
+// 		return err
+// 	}
+
+//		return nil
+//	}
 func (dht *DHT) processMessage(msg Message) Message {
 	var response Message
 
@@ -257,11 +282,6 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 		return Message{}, fmt.Errorf("failed to encode message: %w", err)
 	}
 
-	// Ajouter un retour à la ligne après le message JSON
-	if _, err := s.Write([]byte("\n")); err != nil {
-		return Message{}, fmt.Errorf("failed to write newline: %w", err)
-	}
-
 	var response Message
 	decoder := json.NewDecoder(s)
 	if err = decoder.Decode(&response); err != nil {
@@ -270,6 +290,33 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 
 	return response, nil
 }
+
+// func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
+// 	ctx := context.Background()
+// 	s, err := dht.Host.NewStream(ctx, to, protocol.ID(messageProtocol))
+// 	if err != nil {
+// 		return Message{}, fmt.Errorf("failed to open stream: %w", err)
+// 	}
+// 	defer s.Close()
+
+// 	encoder := json.NewEncoder(s)
+// 	if err = encoder.Encode(message); err != nil {
+// 		return Message{}, fmt.Errorf("failed to encode message: %w", err)
+// 	}
+
+// 	// Ajouter un retour à la ligne après le message JSON
+// 	if _, err := s.Write([]byte("\n")); err != nil {
+// 		return Message{}, fmt.Errorf("failed to write newline: %w", err)
+// 	}
+
+// 	var response Message
+// 	decoder := json.NewDecoder(s)
+// 	if err = decoder.Decode(&response); err != nil {
+// 		return Message{}, fmt.Errorf("failed to decode response: %w", err)
+// 	}
+
+// 	return response, nil
+// }
 
 func (dht *DHT) HandelIncommingMessages() {
 	dht.Host.SetStreamHandler(messageProtocol, func(stream network.Stream) {
