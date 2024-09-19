@@ -175,34 +175,30 @@ func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
 	for {
 		dht.logger.Printf("Waiting for new message...")
 
+		// Read message length (4 bytes)
 		lengthBuf := make([]byte, 4)
-		n, err := io.ReadFull(reader, lengthBuf)
+		_, err := io.ReadFull(reader, lengthBuf)
 		if err != nil {
 			if err == io.EOF {
 				dht.logger.Printf("Connection closed normally")
 				return nil
 			}
-			dht.logger.Printf("Failed to read message length: %v (bytes read: %d)", err, n)
+			dht.logger.Printf("Failed to read message length: %v", err)
 			return fmt.Errorf("failed to read message length: %w", err)
 		}
 
 		messageLength := binary.BigEndian.Uint32(lengthBuf)
 		dht.logger.Printf("Received message length: %d bytes", messageLength)
 
-		if messageLength > 1000000 { // Ajustez cette valeur selon vos besoins
-			dht.logger.Printf("Message length too large: %d bytes", messageLength)
-			return fmt.Errorf("message length too large: %d bytes", messageLength)
-		}
-
 		// Read the message
 		messageBuf := make([]byte, messageLength)
-		n, err = io.ReadFull(reader, messageBuf)
+		_, err = io.ReadFull(reader, messageBuf)
 		if err != nil {
-			dht.logger.Printf("Failed to read message: %v (bytes read: %d)", err, n)
+			dht.logger.Printf("Failed to read message: %v", err)
 			return fmt.Errorf("failed to read message: %w", err)
 		}
 
-		dht.logger.Printf("Raw message received (%d bytes): %x", n, messageBuf)
+		dht.logger.Printf("Raw message received: %x", messageBuf)
 
 		var msg Message
 		if err := json.Unmarshal(messageBuf, &msg); err != nil {
@@ -210,7 +206,7 @@ func (dht *DHT) handleMessage(proto string, rwc io.ReadWriteCloser) error {
 			return err
 		}
 
-		dht.logger.Printf("Decoded message: Type: %v, Key: %s, Value: %s", msg.Type, msg.Key, string(msg.Value))
+		dht.logger.Printf("Received message from peer. Type: %v, Key: %s, Value: %s", msg.Type, msg.Key, string(msg.Value))
 
 		response := dht.processMessage(msg)
 
@@ -353,9 +349,6 @@ func (dht *DHT) SendMessage(to peer.ID, message Message) (Message, error) {
 		return Message{}, fmt.Errorf("failed to open stream: %w", err)
 	}
 	defer s.Close()
-
-	deadline := time.Now().Add(10 * time.Second)
-	s.SetDeadline(deadline)
 
 	// Encode the message
 	messageBytes, err := json.Marshal(message)
