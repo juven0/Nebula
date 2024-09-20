@@ -12,7 +12,6 @@ import (
 	"os"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 
 	//"os/exec"
@@ -128,21 +127,20 @@ func (dht *DHT) handleStream(s network.Stream) {
 	// Créer un multiplexeur multistream
 	mux := multistream.NewMultistreamMuxer[string]()
 	mux.AddHandler(messageProtocol, dht.handleMessage)
-
-	err := mux.Handle(s)
-	if err != nil {
-		if err == io.EOF {
-			dht.logger.Printf("Stream closed by remote peer")
-		} else if strings.Contains(err.Error(), "message did not have trailing newline") {
-			dht.logger.Printf("Received message without trailing newline, trying to handle anyway")
-			// Essayez de lire le message sans le retour à la ligne
-			buf, _ := io.ReadAll(s)
-			dht.logger.Printf("Received raw message: %s", string(buf))
-			// Vous pouvez essayer de traiter le message ici si nécessaire
-		} else {
-			dht.logger.Printf("Failed to handle stream: %v", err)
-		}
-	}
+	buf, _ := io.ReadAll(s)
+	dht.logger.Printf("Received raw message: %s", string(buf))
+	//err := mux.Handle(s)
+	// if err != nil {
+	// 	if err == io.EOF {
+	// 		dht.logger.Printf("Stream closed by remote peer")
+	// 	} else if strings.Contains(err.Error(), "message did not have trailing newline") {
+	// 		dht.logger.Printf("Received message without trailing newline, trying to handle anyway")
+	// 		buf, _ := io.ReadAll(s)
+	// 		dht.logger.Printf("Received raw message: %s", string(buf))
+	// 	} else {
+	// 		dht.logger.Printf("Failed to handle stream: %v", err)
+	// 	}
+	// }
 }
 
 func NewDHT(cfg DHTConfig, h host.Host) *DHT {
@@ -810,7 +808,7 @@ func (dht *DHT) checkProtocolSupport(peerID peer.ID) bool {
 func (dht *DHT) sendConnectionMessage(peerID peer.ID) error {
 	message := Message{
 		Type:  CONNECTION_SUCCESSFUL,
-		Value: []byte(fmt.Sprintf("Hello from %s", dht.Host.ID().String())),
+		Value: []byte("d"),
 	}
 	dht.logger.Printf("Sending connection message to peer %s: %+v", peerID, message)
 	jsonMessage, err := json.Marshal(message)
